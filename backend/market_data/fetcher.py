@@ -81,6 +81,7 @@ def fetch(
 
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame
+        from alpaca.data.enums import DataFeed
 
         days = PERIOD_DAYS.get(period, 365)
         start = datetime.now() - timedelta(days=days)
@@ -90,6 +91,7 @@ def fetch(
             timeframe=TimeFrame.Day,
             start=start,
             end=datetime.now(),
+            feed=DataFeed.IEX,
         )
 
         bars = client.get_stock_bars(request)
