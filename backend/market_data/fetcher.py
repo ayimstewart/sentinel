@@ -3,7 +3,7 @@ import pandas as pd
 import yfinance as yf
 import logging
 import time
-from typing import Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +88,9 @@ def fetch(
         return None
 
 def fetch_many(
-    tickers: list[str],
+    tickers: List[str],
     period: str = '1y'
-) -> dict[str, MarketData]:
+) -> Dict[str, MarketData]:
     results = {}
     for ticker in tickers:
         data = fetch(ticker, period)

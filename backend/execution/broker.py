@@ -2,6 +2,9 @@ import os
 import logging
 from dataclasses import dataclass
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv(os.path.expanduser('~/sentinel/.env'))
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,8 @@ class OrderResult:
 
 def get_client():
     try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.expanduser('~/sentinel/.env'))
         from alpaca.trading.client import TradingClient
         key = os.getenv('ALPACA_API_KEY', '')
         secret = os.getenv('ALPACA_SECRET_KEY', '')

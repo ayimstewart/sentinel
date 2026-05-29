@@ -56,12 +56,12 @@ def calculate_indicators(df) -> Optional[dict]:
         'rsi': float(rsi.iloc[-1]),
         'atr': float(atr.iloc[-1]),
         'atr_pct': float(atr.iloc[-1] / current * 100),
-        'volume': float(volume.iloc[-1]),
-        'avg_volume': float(avg_vol.iloc[-1]),
-        'volume_ratio': (
-            float(volume.iloc[-1] / avg_vol.iloc[-1])
-            if float(avg_vol.iloc[-1]) > 0 else 0
-        ),
+        # Use previous completed day to avoid partial-day distortion
+        'volume': float(volume.iloc[-2]),
+        'avg_volume': float(avg_vol.iloc[-2]),
+        'volume_ratio': round(
+            float(volume.iloc[-2]) / float(avg_vol.iloc[-2]), 2
+        ) if float(avg_vol.iloc[-2]) > 0 else 0,
         'resistance': float(high.rolling(20).max().iloc[-1]),
         'support': float(low.rolling(20).min().iloc[-1]),
         'high_20d': float(high.rolling(20).max().iloc[-1]),
@@ -91,7 +91,7 @@ def ema_trend_ride(
         'ema9_above_ema21': ind['ema9'] > ind['ema21'],
         'near_ema21': near_ema21,
         'rsi_reset': 40 <= ind['rsi'] <= 55,
-        'volume_ok': ind['volume_ratio'] >= 0.8,
+        'volume_ok': ind['volume_ratio'] >= 0.5,
     }
 
     if not all(rules.values()):
@@ -195,7 +195,7 @@ def relative_strength_trend(
         'above_ema50': ind['close'] > ind['ema50'],
         'rsi_healthy': 40 <= ind['rsi'] <= 65,
         'rs_positive': rs > 0,
-        'volume_ok': ind['volume_ratio'] >= 0.8,
+        'volume_ok': ind['volume_ratio'] >= 0.5,
     }
 
     if not all(rules.values()):
@@ -214,7 +214,7 @@ def relative_strength_trend(
         score += 15
     if ind['volume_ratio'] >= 1.5:
         score += 20
-    elif ind['volume_ratio'] >= 0.8:
+    elif ind['volume_ratio'] >= 0.5:
         score += 10
     if ind['close'] > ind['ema200']:
         score += 20
