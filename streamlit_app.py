@@ -53,6 +53,13 @@ from backend.risk.engine import evaluate, Portfolio
 tracker = PortfolioTracker()
 journal = Journal()
 
+# ── TRADINGVIEW HELPER ───────────────────
+def tradingview_link(ticker):
+    return (
+        f"https://www.tradingview.com/chart/"
+        f"?symbol={ticker}"
+    )
+
 # ── TELEGRAM HELPER ──────────────────────
 def _send_telegram(message: str):
     import requests
@@ -241,6 +248,10 @@ if page == '⚡ Today':
                     score = sig.get('score', 0)
                     st.progress(score / 100)
                     st.caption(f"Score: {score}/100")
+                    st.markdown(
+                        f"[📈 View on TradingView]"
+                        f"({tradingview_link(sig['ticker'])})"
+                    )
 
                 with col2:
                     st.write(
@@ -318,6 +329,10 @@ if page == '⚡ Today':
                             st.progress(rank.composite_score / 100)
                             st.caption(
                                 f"Score: {rank.composite_score}/100"
+                            )
+                            st.markdown(
+                                f"[📈 Chart]"
+                                f"({tradingview_link(rank.ticker)})"
                             )
                         with col2:
                             st.write(
@@ -434,6 +449,10 @@ elif page == '📊 Positions':
                 st.write(
                     f"**Shares:** {shares:.4f}  |  "
                     f"**Strategy:** {pos.get('strategy', '')}"
+                )
+                st.markdown(
+                    f"[📈 {pos['ticker']} on TradingView]"
+                    f"({tradingview_link(pos['ticker'])})"
                 )
 
             with col2:
