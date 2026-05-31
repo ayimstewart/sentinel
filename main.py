@@ -19,7 +19,13 @@ from backend.execution.broker import (
     get_portfolio_value,
 )
 from backend.journal.logger import Journal
-from backend.configs.symbols import TRADEABLE_ETFS
+from backend.configs.symbols import (
+    MARKET_FILTERS,
+    SCAN_PRIORITY,
+    MY_ROBINHOOD_STOCKS,
+    ETF_LONG_TERM,
+    get_sector,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,6 +117,33 @@ def send_morning_brief():
                 "No setups today\n"
                 "Waiting for better conditions"
             )
+
+        # Check Robinhood stocks for setups
+        rh_setups = []
+        for ticker in MY_ROBINHOOD_STOCKS:
+            try:
+                data = fetch(ticker, '1y')
+                if data and spy_data:
+                    signal = scan(ticker, data.df, spy_data.df)
+                    if signal and signal.action in ('READY', 'WATCH'):
+                        rh_setups.append({
+                            'ticker': ticker,
+                            'action': signal.action,
+                            'score': signal.score,
+                            'strategy': signal.strategy,
+                        })
+            except Exception:
+                pass
+
+        if rh_setups:
+            msg += f"\n📱 YOUR STOCKS:\n"
+            for s in rh_setups:
+                emoji = '🟢' if s['action'] == 'READY' else '🟡'
+                msg += (
+                    f"{emoji} {s['ticker']} "
+                    f"— {s['action']} "
+                    f"({s['score']}/100)\n"
+                )
 
         msg += "\n\nDashboard: http://localhost:8501"
 
@@ -225,7 +258,7 @@ def send_weekly_review():
 def run_scan():
     logger.info("=" * 40)
     logger.info("Starting ETF scan...")
-    logger.info(f"ETFs: {TRADEABLE_ETFS}")
+    logger.info(f"ETFs: {SCAN_PRIORITY}")
 
     if not is_market_open():
         logger.info("Market closed — skipping scan")
@@ -247,7 +280,7 @@ def run_scan():
 
     signals_found = []
 
-    for ticker in TRADEABLE_ETFS:
+    for ticker in SCAN_PRIORITY:
         try:
             logger.info(f"Scanning {ticker}...")
 
@@ -345,7 +378,7 @@ def run_scan():
 
 def run_bot():
     logger.info("⚡ SENTINEL starting...")
-    logger.info(f"ETFs: {TRADEABLE_ETFS}")
+    logger.info(f"ETFs: {SCAN_PRIORITY}")
 
     journal.log_event('BOT_START', 'Sentinel started')
 

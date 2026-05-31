@@ -1,32 +1,120 @@
-# ETF Universe — this is ALL we trade
-
-# Market condition filters (not traded)
+# Market filters — never trade these
 MARKET_FILTERS = ['SPY', 'QQQ', 'IWM']
 
-# Priority ranking by proven backtest edge (2y)
-PRIORITY_ETFS = [
-    # Backtest 2y: WR=66% PF=4.56 Sharpe=2.56
-    'XLK',   # Best edge — 66% WR Sharpe 2.56
-    # Backtest 2y: WR=54% PF=3.14 Sharpe=1.43
-    'IWM',   # Good edge — 54% WR Sharpe 1.43
-    # Backtest 2y: WR=66% PF=2.10 Sharpe=0.91
-    'VUG',   # Decent — 66% WR low trades
-    # Backtest 2y: WR=60% PF=1.87 Sharpe=0.74
-    'CIBR',  # Decent — 60% WR low trades
-    # Backtest 2y: WR=42% PF=1.12 Sharpe=0.38
-    'SMH',   # Weak — 42% WR watch only
-    # Backtest 2y: WR=33% PF=0.61 Sharpe=-0.22
-    'URA',   # Poor — negative return last
+# ETF long term holds — never swing trade
+ETF_LONG_TERM = [
+    'VOO', 'QQQ', 'SPY', 'GLD', 'IWM'
 ]
 
-TRADEABLE_ETFS = PRIORITY_ETFS
+# SWING UNIVERSE — high quality growth stocks
+# Backtest proven, liquid, trending sectors
+SWING_UNIVERSE = {
+    'ai_tech': [
+        'NVDA', 'MSFT', 'META', 'GOOGL'
+    ],
+    'semiconductors': [
+        'ASML', 'AMD', 'AVGO', 'TSM'
+    ],
+    'cybersecurity': [
+        'CRWD', 'PANW', 'ZS', 'FTNT'
+    ],
+    'software': [
+        'NOW', 'PLTR', 'SNOW', 'MDB'
+    ],
+    'fintech': [
+        'HOOD', 'SOFI', 'SQ', 'AFRM'
+    ],
+    'space_defense': [
+        'RKLB', 'ASTS', 'LMT', 'RTX'
+    ],
+    'nuclear_energy': [
+        'OKLO', 'SMR', 'CEG', 'VST'
+    ],
+    'social_media': [
+        'RDDT', 'SNAP', 'PINS'
+    ],
+    'biotech': [
+        'MRNA', 'NVAX', 'BNTX'
+    ],
+    'consumer_tech': [
+        'AAPL', 'AMZN', 'TSLA'
+    ],
+}
 
-ALL_ETFS = list(
-    dict.fromkeys(MARKET_FILTERS + TRADEABLE_ETFS)
-)
+# All swing tickers flattened
+SWING_TICKERS = [
+    ticker
+    for tickers in SWING_UNIVERSE.values()
+    for ticker in tickers
+]
 
-# Extended universe from ranker (30+ ETFs)
-from backend.strategies.ranker import (  # noqa: E402
-    ETF_UNIVERSE,
-    TRADEABLE,
-)
+# Your personal Robinhood holdings
+# Bot tracks these and looks for swing setups
+MY_ROBINHOOD_STOCKS = [
+    'NVDA',   # AI chips
+    'AAPL',   # Core tech
+    'GRAB',   # Southeast Asia fintech
+    'AGIX',   # AI
+    'XEL',    # Utilities
+    'NBIS',   # Speculative
+    'PENG',   # Speculative
+    'ADAPY',  # Speculative
+]
+
+# Sector mapping for risk engine
+SECTORS = {
+    'NVDA': 'ai_tech',
+    'MSFT': 'ai_tech',
+    'META': 'ai_tech',
+    'GOOGL': 'ai_tech',
+    'AAPL': 'consumer_tech',
+    'AMZN': 'consumer_tech',
+    'TSLA': 'consumer_tech',
+    'ASML': 'semiconductors',
+    'AMD': 'semiconductors',
+    'AVGO': 'semiconductors',
+    'TSM': 'semiconductors',
+    'CRWD': 'cybersecurity',
+    'PANW': 'cybersecurity',
+    'ZS': 'cybersecurity',
+    'FTNT': 'cybersecurity',
+    'NOW': 'software',
+    'PLTR': 'software',
+    'SNOW': 'software',
+    'MDB': 'software',
+    'HOOD': 'fintech',
+    'SOFI': 'fintech',
+    'SQ': 'fintech',
+    'AFRM': 'fintech',
+    'RKLB': 'space_defense',
+    'ASTS': 'space_defense',
+    'LMT': 'space_defense',
+    'RTX': 'space_defense',
+    'OKLO': 'nuclear_energy',
+    'SMR': 'nuclear_energy',
+    'CEG': 'nuclear_energy',
+    'VST': 'nuclear_energy',
+    'RDDT': 'social_media',
+    'SNAP': 'social_media',
+    'PINS': 'social_media',
+    'MRNA': 'biotech',
+    'NVAX': 'biotech',
+    'BNTX': 'biotech',
+    'GRAB': 'fintech',
+    'AGIX': 'ai_tech',
+    'XEL': 'utilities',
+    'NBIS': 'speculative',
+    'PENG': 'speculative',
+    'ADAPY': 'speculative',
+}
+
+
+def get_sector(ticker):
+    return SECTORS.get(ticker, 'other')
+
+
+# Priority scan order
+# Your stocks first then swing universe
+SCAN_PRIORITY = list(dict.fromkeys(
+    MY_ROBINHOOD_STOCKS + SWING_TICKERS
+))

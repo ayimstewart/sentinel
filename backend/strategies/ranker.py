@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import pandas as pd
 import numpy as np
 import logging
+from backend.configs.symbols import MY_ROBINHOOD_STOCKS
 
 logger = logging.getLogger(__name__)
 
@@ -358,7 +359,10 @@ def get_top3_diverse(ranks: List[ETFRank]) -> List[ETFRank]:
 
 
 def run_ranking(fetcher_func) -> Tuple[List[ETFRank], List[ETFRank]]:
-    logger.info(f"Ranking {len(TRADEABLE)} ETFs...")
+    all_tickers = list(dict.fromkeys(
+        MY_ROBINHOOD_STOCKS + TRADEABLE
+    ))
+    logger.info(f"Ranking {len(all_tickers)} tickers...")
 
     spy_data = fetcher_func('SPY', '1y')
     spy_ind = (
@@ -367,7 +371,7 @@ def run_ranking(fetcher_func) -> Tuple[List[ETFRank], List[ETFRank]]:
     )
 
     data_map: Dict = {}
-    for ticker in TRADEABLE:
+    for ticker in all_tickers:
         try:
             data = fetcher_func(ticker, '1y')
             if data:
@@ -375,7 +379,7 @@ def run_ranking(fetcher_func) -> Tuple[List[ETFRank], List[ETFRank]]:
         except Exception as e:
             logger.warning(f"Failed to fetch {ticker}: {e}")
 
-    logger.info(f"Fetched {len(data_map)}/{len(TRADEABLE)} ETFs")
+    logger.info(f"Fetched {len(data_map)}/{len(all_tickers)} tickers")
 
     all_ranks = rank_etfs(data_map, spy_ind)
     top3 = get_top3_diverse(all_ranks)

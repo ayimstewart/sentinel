@@ -47,7 +47,7 @@ from backend.market_data.fetcher import fetch, get_current_price
 from backend.strategies.scanner import scan
 from backend.portfolio.tracker import PortfolioTracker
 from backend.journal.logger import Journal
-from backend.configs.symbols import TRADEABLE_ETFS
+from backend.configs.symbols import SCAN_PRIORITY, MY_ROBINHOOD_STOCKS
 from backend.risk.engine import evaluate, Portfolio
 
 tracker = PortfolioTracker()
@@ -83,6 +83,7 @@ page = st.sidebar.radio(
     [
         '⚡ Today',
         '📊 Positions',
+        '💼 My Stocks',
         '📈 Performance',
         '🧪 Backtest',
         '⚙️ Settings',
@@ -153,7 +154,7 @@ if page == '⚡ Today':
 
     # Run scan
     if scan_now:
-        with st.spinner(f'Scanning {len(TRADEABLE_ETFS)} ETFs...'):
+        with st.spinner(f'Scanning {len(SCAN_PRIORITY)} tickers...'):
             try:
                 spy_data = fetch('SPY', '1y')
                 open_positions = tracker.get_open_positions()
@@ -161,7 +162,7 @@ if page == '⚡ Today':
 
                 new_signals = []
 
-                for ticker in TRADEABLE_ETFS:
+                for ticker in SCAN_PRIORITY:
                     data = fetch(ticker, '1y')
                     if not data or not spy_data:
                         continue
@@ -504,7 +505,7 @@ elif page == '📊 Positions':
     with st.form('add_position'):
         col1, col2 = st.columns(2)
         with col1:
-            add_ticker = st.selectbox('ETF', TRADEABLE_ETFS)
+            add_ticker = st.selectbox('Ticker', SCAN_PRIORITY)
             add_shares = st.number_input(
                 'Shares', min_value=0.01, value=1.0, step=0.01
             )
@@ -552,7 +553,105 @@ elif page == '📊 Positions':
             st.rerun()
 
 # ════════════════════════════════════════
-# SCREEN 3 — PERFORMANCE
+# SCREEN 3 — MY STOCKS
+# ════════════════════════════════════════
+elif page == '💼 My Stocks':
+    st.title('💼 My Robinhood Stocks')
+    st.caption(
+        'Your holdings — swing opportunities highlighted'
+    )
+
+    from backend.market_data.fetcher import fetch
+    from backend.strategies.scanner import (
+        scan, calculate_indicators
+    )
+
+    spy_data = fetch('SPY', '1y')
+
+    st.subheader('Holdings Analysis')
+
+    for ticker in MY_ROBINHOOD_STOCKS:
+        try:
+            data = fetch(ticker, '1y')
+            if not data:
+                continue
+
+            signal = scan(
+                ticker, data.df, spy_data.df
+            ) if spy_data else None
+
+            ind = calculate_indicators(data.df)
+            if not ind:
+                continue
+
+            current = ind['close']
+            rsi = ind['rsi']
+
+            # Determine status
+            if signal and signal.action == 'READY':
+                status = '🟢 SWING OPPORTUNITY'
+            elif signal and signal.action == 'WATCH':
+                status = '🟡 WATCH'
+            elif rsi > 75:
+                status = '⚠️ OVERBOUGHT'
+            elif current > ind['ema50']:
+                status = '📈 UPTREND'
+            else:
+                status = '📉 DOWNTREND'
+
+            col1, col2, col3 = st.columns([2, 2, 2])
+
+            with col1:
+                st.markdown(f"### {ticker}")
+                st.write(f"**${current:.2f}**")
+                st.caption(
+                    f"RSI: {rsi:.0f} | "
+                    f"ATR: {ind['atr_pct']:.1f}%"
+                )
+
+            with col2:
+                st.write(status)
+                if signal:
+                    st.write(
+                        f"Strategy: {signal.strategy}"
+                    )
+                    st.write(
+                        f"Score: {signal.score}/100"
+                    )
+                else:
+                    above = current > ind['ema21']
+                    st.write(
+                        f"EMA21: "
+                        f"{'✅ Above' if above else '❌ Below'}"
+                    )
+
+            with col3:
+                if signal and signal.action in (
+                    'READY', 'WATCH'
+                ):
+                    st.write(
+                        f"Entry: ${signal.entry:.2f}"
+                    )
+                    st.write(
+                        f"Stop: ${signal.stop:.2f}"
+                    )
+                    st.write(
+                        f"Target: ${signal.target1:.2f}"
+                    )
+
+                st.markdown(
+                    f"[📈 TradingView]"
+                    f"(https://www.tradingview.com"
+                    f"/chart/?symbol={ticker})"
+                )
+
+            st.divider()
+
+        except Exception as e:
+            st.error(f"{ticker}: {e}")
+
+# ════════════════════════════════════════
+# SCREEN 4 — PERFORMANCE
 # Question: Is my strategy working?
 # ════════════════════════════════════════
 elif page == '📈 Performance':
@@ -875,8 +974,8 @@ elif page == '⚙️ Settings':
 
     st.divider()
 
-    st.subheader('ETF Universe')
-    for etf in TRADEABLE_ETFS:
+    st.subheader('Scan Universe')
+    for etf in SCAN_PRIORITY:
         st.write(f"• {etf}")
 
     st.divider()

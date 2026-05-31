@@ -1,25 +1,14 @@
 from dataclasses import dataclass
 from typing import Optional
 from backend.strategies.scanner import Signal
+from backend.configs.symbols import get_sector
 
 # Risk parameters — change here only
 MAX_POSITIONS = 3
 MAX_RISK_PCT = 0.02        # 2% per trade
 MAX_DAILY_LOSS_PCT = 0.05  # 5% daily limit
-MAX_SECTOR_POSITIONS = 1   # 1 ETF per sector
+MAX_SECTOR_POSITIONS = 1   # 1 position per sector
 MIN_ATR_PCT = 0.01         # 1% minimum movement
-
-# Sector mapping
-SECTORS = {
-    'SMH': 'semiconductors',
-    'XLK': 'technology',
-    'CIBR': 'cybersecurity',
-    'VUG': 'growth',
-    'URA': 'nuclear',
-    'IWM': 'small_caps',
-    'SPY': 'broad_market',
-    'QQQ': 'broad_market',
-}
 
 
 @dataclass
@@ -75,17 +64,14 @@ def evaluate(
         )
 
     # Gate 4 — sector exposure
-    new_sector = SECTORS.get(signal.ticker)
-    if new_sector:
-        held_sectors = [
-            SECTORS.get(p['ticker'])
-            for p in portfolio.positions
-        ]
-        if held_sectors.count(new_sector) >= MAX_SECTOR_POSITIONS:
-            return RiskDecision(
-                allowed=False,
-                reason=f"Sector {new_sector} already at max",
-            )
+    sector_ok, sector_reason = _check_sector(
+        signal.ticker, portfolio.positions
+    )
+    if not sector_ok:
+        return RiskDecision(
+            allowed=False,
+            reason=sector_reason,
+        )
 
     # Gate 5 — calculate position size
     sizing = _calculate_size(
@@ -120,6 +106,26 @@ def evaluate(
         risk_amount=risk,
         stop_price=signal.stop,
     )
+
+
+def _check_sector(new_ticker, positions):
+    new_sector = get_sector(new_ticker)
+    if new_sector in ('speculative', 'other'):
+        spec_count = sum(
+            1 for p in positions
+            if get_sector(p['ticker']) in
+            ('speculative', 'other')
+        )
+        if spec_count >= 1:
+            return False, 'Max 1 speculative position'
+        return True, 'OK'
+
+    for pos in positions:
+        if get_sector(pos['ticker']) == new_sector:
+            return False, (
+                f"Sector {new_sector} already held"
+            )
+    return True, 'OK'
 
 
 def _calculate_size(
@@ -160,5 +166,3 @@ def _calculate_size(
     return shares, cost, risk
 
 
-def get_sector(ticker: str) -> str:
-    return SECTORS.get(ticker, 'unknown')
