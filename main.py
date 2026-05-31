@@ -55,7 +55,7 @@ def _send_telegram(message: str):
 def send_morning_brief():
     try:
         spy_data = fetch('SPY', '1y')
-        qqq_data = fetch('QQQ', '5d')
+        qqq_data = fetch('QQQ', '1mo')
 
         spy_chg = 0.0
         qqq_chg = 0.0
