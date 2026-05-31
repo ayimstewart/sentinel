@@ -53,30 +53,26 @@ def _send_telegram(message: str):
 # ── MORNING BRIEF ─────────────────────────────────────────
 
 def send_morning_brief():
-    token = os.getenv('TELEGRAM_BOT_TOKEN')
-    chat_id = os.getenv('TELEGRAM_CHAT_ID')
-
-    if not token or not chat_id:
-        logger.warning('Telegram not configured')
-        return
-
     try:
         spy_data = fetch('SPY', '1y')
         qqq_data = fetch('QQQ', '5d')
 
+        spy_chg = 0.0
+        qqq_chg = 0.0
+
         if spy_data and len(spy_data.df) >= 2:
-            spy_close = float(spy_data.df['Close'].iloc[-1])
-            spy_prev = float(spy_data.df['Close'].iloc[-2])
-            spy_chg = (spy_close - spy_prev) / spy_prev * 100
-        else:
-            spy_chg = 0.0
+            spy_chg = round(
+                (float(spy_data.df['Close'].iloc[-1]) -
+                 float(spy_data.df['Close'].iloc[-2])) /
+                float(spy_data.df['Close'].iloc[-2]) * 100, 2
+            )
 
         if qqq_data and len(qqq_data.df) >= 2:
-            qqq_close = float(qqq_data.df['Close'].iloc[-1])
-            qqq_prev = float(qqq_data.df['Close'].iloc[-2])
-            qqq_chg = (qqq_close - qqq_prev) / qqq_prev * 100
-        else:
-            qqq_chg = 0.0
+            qqq_chg = round(
+                (float(qqq_data.df['Close'].iloc[-1]) -
+                 float(qqq_data.df['Close'].iloc[-2])) /
+                float(qqq_data.df['Close'].iloc[-2]) * 100, 2
+            )
 
         market = '🟢 BULLISH' if spy_chg > 0 else '🔴 BEARISH'
 
@@ -93,33 +89,32 @@ def send_morning_brief():
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
             f"Market: {market}\n"
             f"SPY: {spy_chg:+.1f}% | QQQ: {qqq_chg:+.1f}%\n\n"
-            f"Open positions: {len(positions)}/3\n"
-            f"Budget: ${budget:.0f} available\n\n"
+            f"Positions: {len(positions)}/3\n"
+            f"Budget: ${budget:.0f}\n\n"
         )
 
         if signals:
-            msg += f"📡 {len(signals)} setups found\n"
-            for s in signals[:3]:
-                action = s.get('action', '')
-                ticker = s.get('ticker', '')
-                score = s.get('score', 0)
-                emoji = '🟢' if action == 'READY' else '🟡'
-                msg += f"{emoji} {ticker} — {action} ({score}/100)\n"
-            msg += "\nCheck dashboard to approve"
+            ready = [s for s in signals if s.get('action') == 'READY']
+            watch = [s for s in signals if s.get('action') == 'WATCH']
+
+            if ready:
+                msg += f"🟢 READY ({len(ready)}):\n"
+                for s in ready[:3]:
+                    msg += f"  {s['ticker']} score={s['score']}\n"
+            if watch:
+                msg += f"🟡 WATCH ({len(watch)}):\n"
+                for s in watch[:3]:
+                    msg += f"  {s['ticker']} score={s['score']}\n"
+            msg += "\nOpen dashboard to approve"
         else:
             msg += (
                 "No setups today\n"
-                "Market conditions not ideal\n"
-                "Bot will alert when ready"
+                "Waiting for better conditions"
             )
 
-        msg += f"\n\nDashboard: {DASHBOARD_URL}"
+        msg += "\n\nDashboard: http://localhost:8501"
 
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={'chat_id': chat_id, 'text': msg},
-            timeout=10,
-        )
+        _send_telegram(msg)
         logger.info("Morning brief sent")
 
     except Exception as e:
@@ -129,9 +124,6 @@ def send_morning_brief():
 # ── EXIT ALERTS ───────────────────────────────────────────
 
 def check_exit_alerts():
-    token = os.getenv('TELEGRAM_BOT_TOKEN')
-    chat_id = os.getenv('TELEGRAM_CHAT_ID')
-
     positions = tracker.get_open_positions()
     if not positions:
         return
@@ -144,7 +136,7 @@ def check_exit_alerts():
 
         try:
             data = fetch(ticker, '5d')
-            if not data:
+            if not data or data.df.empty:
                 continue
 
             current = float(data.df['Close'].iloc[-1])
@@ -153,61 +145,79 @@ def check_exit_alerts():
                 if entry > 0 else 0
             )
 
-            if current <= stop * 1.01:
-                msg = (
+            if current <= stop * 1.02:
+                _send_telegram(
                     f"🛑 STOP ALERT — {ticker}\n"
                     f"Price: ${current:.2f}\n"
                     f"Stop: ${stop:.2f}\n"
                     f"PnL: {pnl_pct:+.1f}%\n\n"
                     f"Consider selling on Robinhood"
                 )
-                if token and chat_id:
-                    requests.post(
-                        f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={'chat_id': chat_id, 'text': msg},
-                        timeout=10,
-                    )
+                logger.warning(f"Stop alert: {ticker}")
 
-            elif current >= target1 * 0.99:
-                msg = (
+            elif target1 > 0 and current >= target1 * 0.99:
+                _send_telegram(
                     f"🎯 TARGET HIT — {ticker}\n"
                     f"Price: ${current:.2f}\n"
                     f"Target: ${target1:.2f}\n"
                     f"PnL: {pnl_pct:+.1f}%\n\n"
                     f"Consider selling 50% on Robinhood"
                 )
-                if token and chat_id:
-                    requests.post(
-                        f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={'chat_id': chat_id, 'text': msg},
-                        timeout=10,
-                    )
+                logger.info(f"Target alert: {ticker}")
 
         except Exception as e:
-            logger.error(f"Exit check error {ticker}: {e}")
+            logger.error(f"Exit check {ticker}: {e}")
 
 
 # ── WEEKLY REVIEW ─────────────────────────────────────────
 
 def send_weekly_review():
-    stats = journal.get_stats()
-    positions = tracker.get_open_positions()
+    try:
+        stats = journal.get_stats()
+        positions = tracker.get_open_positions()
+        breakdown = journal.get_strategy_breakdown()
 
-    msg = (
-        f"📊 SENTINEL WEEKLY REVIEW\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"PERFORMANCE\n"
-        f"Total trades: {stats.get('total_trades', 0)}\n"
-        f"Win rate: {stats.get('win_rate', 0):.0f}%\n"
-        f"Total PnL: ${stats.get('total_pnl', 0):+.2f}\n"
-        f"Profit factor: {stats.get('profit_factor', 0):.2f}\n\n"
-        f"POSITIONS\n"
-        f"Open: {len(positions)}/3\n\n"
-        f"GOAL\n"
-        f"Car fund progress updating...\n\n"
-        f"Have a great weekend! 🎯"
-    )
-    _send_telegram(msg)
+        budget = float(os.getenv('SWING_BUDGET', '300'))
+        total_pnl = stats.get('total_pnl', 0)
+        car_goal = 40000
+        saved = budget + total_pnl
+        progress = (saved / car_goal) * 100
+
+        msg = (
+            f"📊 SENTINEL WEEKLY REVIEW\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"PERFORMANCE\n"
+            f"Trades: {stats.get('total_trades', 0)}\n"
+            f"Win rate: {stats.get('win_rate', 0):.0f}%\n"
+            f"Total PnL: ${total_pnl:+.2f}\n"
+            f"Profit factor: {stats.get('profit_factor', 0):.2f}\n\n"
+        )
+
+        if breakdown:
+            msg += "STRATEGY BREAKDOWN\n"
+            for strat, data in breakdown.items():
+                msg += (
+                    f"{strat}: "
+                    f"{data['trades']} trades | "
+                    f"{data.get('win_rate', 0):.0f}% WR | "
+                    f"${data['total_pnl']:+.2f}\n"
+                )
+            msg += "\n"
+
+        msg += (
+            f"POSITIONS\n"
+            f"Open: {len(positions)}/3\n\n"
+            f"🎯 CAR GOAL\n"
+            f"${saved:.2f} / $40,000\n"
+            f"Progress: {progress:.2f}%\n\n"
+            f"Have a great weekend! 💪"
+        )
+
+        _send_telegram(msg)
+        logger.info("Weekly review sent")
+
+    except Exception as e:
+        logger.error(f"Weekly review error: {e}")
 
 
 # ── SCAN ──────────────────────────────────────────────────
@@ -334,27 +344,37 @@ def run_scan():
 # ── BOT RUNNER ────────────────────────────────────────────
 
 def run_bot():
-    logger.info("SENTINEL starting...")
-    logger.info(f"ETF universe: {TRADEABLE_ETFS}")
+    logger.info("⚡ SENTINEL starting...")
+    logger.info(f"ETFs: {TRADEABLE_ETFS}")
 
     journal.log_event('BOT_START', 'Sentinel started')
 
     _send_telegram(
         f"⚡ Sentinel started\n"
         f"Scanning every 45 minutes\n"
-        f"Dashboard: {DASHBOARD_URL}"
+        f"Morning brief at 9am EST\n"
+        f"Dashboard: http://localhost:8501"
     )
 
     run_scan()
 
-    schedule.every().day.at("09:00").do(send_morning_brief)
+    # Morning brief weekdays only
+    schedule.every().monday.at("09:00").do(send_morning_brief)
+    schedule.every().tuesday.at("09:00").do(send_morning_brief)
+    schedule.every().wednesday.at("09:00").do(send_morning_brief)
+    schedule.every().thursday.at("09:00").do(send_morning_brief)
+    schedule.every().friday.at("09:00").do(send_morning_brief)
+
     schedule.every(45).minutes.do(run_scan)
     schedule.every(30).minutes.do(check_exit_alerts)
     schedule.every().sunday.at("18:00").do(send_weekly_review)
 
     logger.info(
-        "Schedule: scan 45min, morning brief 9am, "
-        "exit checks 30min, weekly review Sun 6pm"
+        "Schedule active:\n"
+        "  Scan: every 45 min\n"
+        "  Morning brief: 9am weekdays\n"
+        "  Exit checks: every 30 min\n"
+        "  Weekly review: Sunday 6pm"
     )
 
     while True:
