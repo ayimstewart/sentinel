@@ -1,0 +1,4 @@
+2026-05-31 12:02:59,597 [INFO] Portfolio DB initialized
+2026-05-31 12:02:59,597 [INFO] Journal DB initialized
+2026-05-31 12:02:59,597 [INFO] ⚡ SENTINEL starting...
+2026-05-31 12:02:59,597 [INFO] ETFs: ['XLK', 'IWM', 'VUG', 'CIBR', 'SMH', 'URA']
