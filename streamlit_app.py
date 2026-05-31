@@ -77,6 +77,7 @@ page = st.sidebar.radio(
         '⚡ Today',
         '📊 Positions',
         '📈 Performance',
+        '🧪 Backtest',
         '⚙️ Settings',
     ],
     label_visibility='collapsed',
@@ -632,7 +633,188 @@ elif page == '📈 Performance':
     )
 
 # ════════════════════════════════════════
-# SCREEN 4 — SETTINGS
+# SCREEN 4 — BACKTEST
+# ════════════════════════════════════════
+elif page == '🧪 Backtest':
+    st.title('🧪 Backtest')
+    st.caption(
+        'Test strategies on historical data'
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        bt_ticker = st.selectbox(
+            'ETF',
+            ['SMH','XLK','CIBR','VUG',
+             'URA','IWM','XLV','GLD',
+             'XLE','XLF','IWF']
+        )
+    with col2:
+        bt_strategy = st.selectbox(
+            'Strategy',
+            ['ALL','EMA_RIDE',
+             'BREAKOUT','RS_TREND']
+        )
+    with col3:
+        bt_capital = st.number_input(
+            'Starting Capital',
+            min_value=100,
+            value=300,
+            step=100
+        )
+
+    if st.button(
+        '▶ Run Backtest',
+        type='primary',
+        use_container_width=True
+    ):
+        with st.spinner(
+            f'Backtesting {bt_ticker}...'
+        ):
+            try:
+                from backend.backtest.engine import (
+                    BacktestEngine
+                )
+                from backend.market_data.fetcher import (
+                    fetch
+                )
+
+                df = fetch(bt_ticker, '2y')
+                spy_df = fetch('SPY', '2y')
+
+                if not df or not spy_df:
+                    st.error('Could not fetch data')
+                else:
+                    engine = BacktestEngine(
+                        initial_capital=bt_capital
+                    )
+                    result = engine.run(
+                        bt_ticker,
+                        df.df,
+                        spy_df.df,
+                        bt_strategy
+                    )
+
+                    if not result:
+                        st.warning(
+                            'No trades found'
+                        )
+                    else:
+                        # Metrics
+                        col1,col2,col3,col4 = (
+                            st.columns(4)
+                        )
+                        with col1:
+                            st.metric(
+                                'Win Rate',
+                                f"{result.win_rate}%"
+                            )
+                            st.metric(
+                                'Total Trades',
+                                result.total_trades
+                            )
+                        with col2:
+                            st.metric(
+                                'Total Return',
+                                f"{result.total_return_pct}%"
+                            )
+                            st.metric(
+                                'Final Value',
+                                f"${result.final_value}"
+                            )
+                        with col3:
+                            st.metric(
+                                'Profit Factor',
+                                result.profit_factor
+                            )
+                            st.metric(
+                                'Sharpe Ratio',
+                                result.sharpe_ratio
+                            )
+                        with col4:
+                            st.metric(
+                                'Max Drawdown',
+                                f"-{result.max_drawdown_pct}%"
+                            )
+                            st.metric(
+                                'Expectancy',
+                                f"${result.expectancy}"
+                            )
+
+                        st.divider()
+
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric(
+                                'Avg Win',
+                                f"${result.avg_win}"
+                            )
+                            st.metric(
+                                'Best Trade',
+                                f"${result.best_trade}"
+                            )
+                        with col2:
+                            st.metric(
+                                'Avg Loss',
+                                f"${result.avg_loss}"
+                            )
+                            st.metric(
+                                'Worst Trade',
+                                f"${result.worst_trade}"
+                            )
+
+                        # Interpret results
+                        st.divider()
+                        st.subheader('Verdict')
+
+                        if (result.win_rate >= 55 and
+                                result.profit_factor >= 1.5):
+                            st.success(
+                                '✅ Strategy looks viable!'
+                                ' Consider paper trading.'
+                            )
+                        elif result.profit_factor >= 1.0:
+                            st.warning(
+                                '⚠️ Marginal edge. '
+                                'Need more testing.'
+                            )
+                        else:
+                            st.error(
+                                '❌ No edge detected. '
+                                'Do not trade this.'
+                            )
+
+                        # Trade list
+                        if result.trades:
+                            st.divider()
+                            st.subheader(
+                                f'Trade History '
+                                f'({len(result.trades)})'
+                            )
+                            import pandas as pd
+                            rows = [{
+                                'Entry': t.entry_date,
+                                'Exit': t.exit_date,
+                                'Entry $': t.entry_price,
+                                'Exit $': t.exit_price,
+                                'PnL': t.pnl,
+                                'PnL %': t.pnl_pct,
+                                'Days': t.hold_days,
+                                'Reason': t.exit_reason
+                            } for t in result.trades]
+                            st.dataframe(
+                                pd.DataFrame(rows),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+
+            except Exception as e:
+                st.error(f"Backtest error: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+# ════════════════════════════════════════
+# SCREEN 5 — SETTINGS
 # ════════════════════════════════════════
 elif page == '⚙️ Settings':
     st.title('⚙️ Settings')
