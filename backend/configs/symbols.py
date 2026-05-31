@@ -58,7 +58,6 @@ MY_ROBINHOOD_STOCKS = [
     'XEL',    # Utilities
     'NBIS',   # Speculative
     'PENG',   # Speculative
-    'ADAPY',  # Speculative
 ]
 
 # Sector mapping for risk engine
