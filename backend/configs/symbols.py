@@ -3,7 +3,7 @@
 # Market condition filters (not traded)
 MARKET_FILTERS = ['SPY', 'QQQ', 'IWM']
 
-# Tradeable ETFs
+# Tradeable ETFs (core scanner universe)
 TRADEABLE_ETFS = [
     'SMH',   # Semiconductors
     'XLK',   # Technology
@@ -15,4 +15,10 @@ TRADEABLE_ETFS = [
 
 ALL_ETFS = list(
     dict.fromkeys(MARKET_FILTERS + TRADEABLE_ETFS)
+)
+
+# Extended universe from ranker (30+ ETFs)
+from backend.strategies.ranker import (  # noqa: E402
+    ETF_UNIVERSE,
+    TRADEABLE,
 )

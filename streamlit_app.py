@@ -288,6 +288,85 @@ if page == '⚡ Today':
 
                 st.divider()
 
+    # ── ETF RANKINGS ─────────────────────────
+    st.divider()
+    st.subheader('📊 ETF Rankings')
+
+    if st.button('🏆 Rank All ETFs', key='rank_btn'):
+        with st.spinner('Ranking 30+ ETFs...'):
+            try:
+                from backend.strategies.ranker import run_ranking
+                import pandas as pd
+
+                all_ranks, top3 = run_ranking(fetch)
+
+                if top3:
+                    st.subheader('🏆 Top 3 Picks')
+                    for i, rank in enumerate(top3):
+                        col1, col2 = st.columns([3, 2])
+                        with col1:
+                            emoji = (
+                                '🟢' if rank.action == 'READY'
+                                else '🟡'
+                            )
+                            st.markdown(
+                                f"### {i + 1}. {emoji} "
+                                f"{rank.ticker} — {rank.action}"
+                            )
+                            st.write(f"Sector: {rank.sector}")
+                            st.progress(rank.composite_score / 100)
+                            st.caption(
+                                f"Score: {rank.composite_score}/100"
+                            )
+                        with col2:
+                            st.write(
+                                f"**Trend:** "
+                                f"{rank.trend_score:.0f}/100"
+                            )
+                            st.write(
+                                f"**RS:** "
+                                f"{rank.rs_score:.0f}/100"
+                            )
+                            st.write(
+                                f"**Momentum:** "
+                                f"{rank.momentum_score:.0f}/100"
+                            )
+                            st.write(
+                                f"**RSI:** {rank.rsi:.0f}"
+                                f"{'⚠️' if rank.overbought else ''}"
+                            )
+                        st.caption(rank.reason)
+                        st.divider()
+                else:
+                    st.info("No READY or WATCH picks today.")
+
+                if all_ranks:
+                    st.subheader('All ETF Rankings')
+                    rows = []
+                    for r in all_ranks[:20]:
+                        rows.append({
+                            'Ticker': r.ticker,
+                            'Sector': r.sector,
+                            'Score': r.composite_score,
+                            'Trend': r.trend_score,
+                            'RS': r.rs_score,
+                            'Volume': r.volume_score,
+                            'Momentum': r.momentum_score,
+                            'RSI': round(r.rsi, 0),
+                            'Overbought': (
+                                '⚠️' if r.overbought else '✅'
+                            ),
+                            'Action': r.action,
+                        })
+                    st.dataframe(
+                        pd.DataFrame(rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+            except Exception as e:
+                st.error(f"Ranking error: {e}")
+
 # ════════════════════════════════════════
 # SCREEN 2 — POSITIONS
 # Question: What do I have open?
