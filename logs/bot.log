@@ -2,3 +2,12 @@
 2026-05-31 12:02:59,597 [INFO] Journal DB initialized
 2026-05-31 12:02:59,597 [INFO] ⚡ SENTINEL starting...
 2026-05-31 12:02:59,597 [INFO] ETFs: ['XLK', 'IWM', 'VUG', 'CIBR', 'SMH', 'URA']
+2026-05-31 12:03:10,219 [INFO] ========================================
+2026-05-31 12:03:10,219 [INFO] Starting ETF scan...
+2026-05-31 12:03:10,219 [INFO] ETFs: ['XLK', 'IWM', 'VUG', 'CIBR', 'SMH', 'URA']
+2026-05-31 12:03:10,593 [INFO] Market closed — skipping scan
+2026-05-31 12:03:10,594 [INFO] Schedule active:
+  Scan: every 45 min
+  Morning brief: 9am weekdays
+  Exit checks: every 30 min
+  Weekly review: Sunday 6pm
