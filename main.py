@@ -71,19 +71,41 @@ def _send_telegram(message: str):
 def _send_signals_telegram(signals: list):
     if not signals:
         return
-    msg = f"📡 SENTINEL SCAN — {len(signals)} signal(s)\n\n"
-    for s in signals[:3]:
-        emoji = '🟢' if s.get('action') == 'READY' else '🟡'
-        msg += (
-            f"{emoji} {s['ticker']} — {s.get('action')}\n"
-            f"Strategy: {s.get('strategy')}\n"
-            f"Score: {s.get('score')}/100\n"
-            f"Entry: ${s.get('entry', 0):.2f}\n"
-            f"Stop: ${s.get('stop', 0):.2f}\n"
-            f"Target: ${s.get('target1', 0):.2f}\n\n"
+    for sig in signals[:3]:
+        hold = sig.get('hold_plan', {})
+        emoji = '🟢' if sig.get('action') == 'READY' else '🟡'
+        msg = (
+            f"⚡ SWING SIGNAL\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{emoji} {sig['ticker']} — {sig.get('action')}\n"
+            f"Strategy: {sig.get('strategy')}\n"
+            f"Score: {sig.get('score')}/100\n\n"
+            f"TRADE PLAN\n"
+            f"Entry:    ${sig.get('entry', 0):.2f}\n"
+            f"Stop:     ${sig.get('stop', 0):.2f} "
+            f"(-{hold.get('risk_pct', 3)}%)\n"
+            f"Target 1: ${sig.get('target1', 0):.2f} "
+            f"(+{hold.get('reward_pct', 8)}%)\n"
+            f"Target 2: ${sig.get('target2', 0):.2f}\n\n"
+            f"HOLD PLAN\n"
+            f"Duration: "
+            f"{hold.get('hold_estimate', '3-7 days')}\n"
+            f"R/R Ratio: "
+            f"1:{hold.get('rr_ratio', 2.5)}\n\n"
+            f"EXIT RULES\n"
         )
-    msg += "Open dashboard to approve"
-    _send_telegram(msg)
+        for rule in hold.get('exit_rules', []):
+            msg += f"• {rule}\n"
+        msg += (
+            f"\n📱 ROBINHOOD STEPS:\n"
+            f"1. Open Robinhood\n"
+            f"2. Search {sig['ticker']}\n"
+            f"3. Buy ${sig.get('cost', 0):.2f} worth\n"
+            f"4. Set stop at ${sig.get('stop', 0):.2f}\n\n"
+            f"Check dashboard to approve:"
+            f"\nhttp://localhost:8501"
+        )
+        _send_telegram(msg)
 
 
 # ── MORNING BRIEF ─────────────────────────────────────────
@@ -385,6 +407,7 @@ def run_scan():
                 'shares': risk.shares,
                 'cost': risk.position_value,
                 'explanation': explanation,
+                'hold_plan': signal.hold_plan,
             })
 
             logger.info(
@@ -483,6 +506,115 @@ def execute_approved_trade(signal_data: dict):
     return results
 
 
+# ── DAILY POSITION UPDATE ─────────────────────────────────
+
+def daily_position_update():
+    positions = tracker.get_open_positions()
+    if not positions:
+        return
+
+    for pos in positions:
+        ticker = pos['ticker']
+        entry = pos.get('entry_price', 0)
+        stop = pos.get('stop_price', 0)
+        target1 = pos.get('target1', 0)
+
+        try:
+            data = fetch(ticker, '5d')
+            if not data:
+                continue
+
+            current = float(data.df['Close'].iloc[-1])
+            pnl_pct = (
+                (current - entry) / entry * 100
+                if entry > 0 else 0
+            )
+
+            progress = (
+                (current - entry) /
+                (target1 - entry) * 100
+            ) if target1 > entry else 0
+            progress = max(0, min(100, progress))
+
+            action = "HOLD ✅"
+            if current <= stop * 1.02:
+                action = "⚠️ NEAR STOP — CONSIDER SELLING"
+            elif current >= target1 * 0.99:
+                action = "🎯 TARGET HIT — SELL HALF"
+            elif pnl_pct < -2:
+                action = "⚠️ WEAKENING — WATCH CLOSELY"
+
+            msg = (
+                f"📊 DAILY UPDATE — {ticker}\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Entry:   ${entry:.2f}\n"
+                f"Current: ${current:.2f}\n"
+                f"PnL:     {pnl_pct:+.1f}%\n\n"
+                f"Stop:    ${stop:.2f}\n"
+                f"Target:  ${target1:.2f}\n"
+                f"Progress: {progress:.0f}% to target\n\n"
+                f"ACTION: {action}\n\n"
+                f"Morning check:\n"
+                f"• Below ${stop:.2f} → SELL ALL\n"
+                f"• Above ${target1:.2f} → SELL HALF\n"
+                f"• Between → HOLD"
+            )
+
+            _send_telegram(msg)
+
+        except Exception as e:
+            logger.error(
+                f"Daily update {ticker}: {e}"
+            )
+
+
+# ── WEEKLY DISCOVERY ──────────────────────────────────────
+
+def run_weekly_discovery():
+    from backend.strategies.discovery import (
+        auto_add_discoveries, DISCOVERY_UNIVERSE
+    )
+    _send_telegram(
+        "🔍 Running weekly stock discovery...\n"
+        "Scanning 500+ stocks for opportunities"
+    )
+
+    try:
+        added, discoveries = auto_add_discoveries(
+            fetch, db, min_score=75.0
+        )
+
+        msg = (
+            f"🔍 DISCOVERY COMPLETE\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Scanned: {len(DISCOVERY_UNIVERSE)} stocks\n"
+            f"Found: {len(discoveries)} opportunities\n"
+            f"Auto-added: {len(added)} new stocks\n\n"
+        )
+
+        if discoveries:
+            msg += "TOP DISCOVERIES:\n"
+            for d in discoveries[:5]:
+                msg += (
+                    f"• {d.ticker} "
+                    f"score={d.score} "
+                    f"{d.action}\n"
+                    f"  {d.reason}\n"
+                )
+
+        if added:
+            msg += (
+                f"\nAdded to watchlist: "
+                f"{', '.join(added)}"
+            )
+
+        _send_telegram(msg)
+
+    except Exception as e:
+        logger.error(f"Weekly discovery error: {e}")
+        _send_telegram(f"Discovery error: {e}")
+
+
 # ── BOT RUNNER ────────────────────────────────────────────
 
 def run_bot():
@@ -517,6 +649,12 @@ def run_bot():
 
     schedule.every(45).minutes.do(run_scan)
     schedule.every(30).minutes.do(check_exit_alerts)
+    schedule.every().day.at("10:00").do(
+        daily_position_update
+    )
+    schedule.every().sunday.at("17:00").do(
+        run_weekly_discovery
+    )
     schedule.every().sunday.at("18:00").do(send_weekly_review)
 
     logger.info(
@@ -524,6 +662,8 @@ def run_bot():
         "  Scan: every 45 min\n"
         "  Morning brief: 9am weekdays\n"
         "  Exit checks: every 30 min\n"
+        "  Daily update: 10am daily\n"
+        "  Discovery: Sunday 5pm\n"
         "  Weekly review: Sunday 6pm"
     )
 

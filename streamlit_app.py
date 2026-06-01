@@ -87,6 +87,7 @@ page = st.sidebar.radio(
         '📈 Performance',
         '🧪 Backtest',
         '📋 Watchlist',
+        '🔍 Discover',
         '⚙️ Settings',
     ],
     label_visibility='collapsed',
@@ -1102,7 +1103,132 @@ elif page == '📋 Watchlist':
             )
 
 # ════════════════════════════════════════
-# SCREEN 7 — SETTINGS
+# SCREEN 7 — DISCOVER
+# ════════════════════════════════════════
+elif page == '🔍 Discover':
+    st.title('🔍 Stock Discovery')
+    st.caption(
+        'Bot scans 500+ stocks to find '
+        'the best opportunities'
+    )
+
+    from backend.strategies.discovery import (
+        DISCOVERY_UNIVERSE
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        min_score = st.slider(
+            'Minimum score', 50, 90, 70
+        )
+    with col2:
+        max_results = st.slider(
+            'Max results', 5, 20, 10
+        )
+
+    if st.button(
+        '🔍 Discover Now',
+        type='primary',
+        use_container_width=True
+    ):
+        with st.spinner(
+            f'Scanning {len(DISCOVERY_UNIVERSE)} stocks...'
+        ):
+            try:
+                from backend.strategies.discovery import (
+                    discover_opportunities
+                )
+                from backend.market_data.fetcher import (
+                    fetch as _fetch
+                )
+
+                discoveries = discover_opportunities(
+                    _fetch,
+                    min_score=min_score,
+                    max_results=max_results
+                )
+
+                if not discoveries:
+                    st.info(
+                        'No discoveries found. '
+                        'Try lower minimum score.'
+                    )
+                else:
+                    st.success(
+                        f'Found {len(discoveries)} '
+                        f'opportunities!'
+                    )
+
+                    db_inst = Database()
+                    existing_tickers = [
+                        w['ticker']
+                        for w in db_inst.get_watchlist()
+                    ]
+
+                    for d in discoveries:
+                        col1, col2, col3 = (
+                            st.columns([2, 2, 1])
+                        )
+                        with col1:
+                            emoji = (
+                                '🟢'
+                                if d.action == 'READY'
+                                else '🟡'
+                            )
+                            st.markdown(
+                                f"### {emoji} {d.ticker}"
+                            )
+                            st.write(d.sector)
+                            st.progress(d.score / 100)
+                            st.caption(
+                                f"Score: {d.score}/100"
+                            )
+
+                        with col2:
+                            st.write(
+                                f"RS vs SPY: "
+                                f"{d.rs_vs_spy:+.1f}%"
+                            )
+                            st.write(
+                                f"Momentum 5d: "
+                                f"{d.momentum_5d:+.1f}%"
+                            )
+                            st.write(
+                                f"Volume: "
+                                f"{d.volume_ratio:.1f}x"
+                            )
+                            st.write(
+                                f"RSI: {d.rsi:.0f}"
+                            )
+
+                        with col3:
+                            if d.ticker in existing_tickers:
+                                st.success('✅ Watching')
+                            else:
+                                if st.button(
+                                    '➕ Add',
+                                    key=f"add_{d.ticker}",
+                                    use_container_width=True
+                                ):
+                                    db_inst.add_to_watchlist(
+                                        d.ticker,
+                                        'stock',
+                                        d.sector,
+                                        d.reason
+                                    )
+                                    st.success('Added!')
+                                    st.rerun()
+
+                        st.caption(d.reason)
+                        st.divider()
+
+            except Exception as e:
+                st.error(f"Discovery error: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+# ════════════════════════════════════════
+# SCREEN 8 — SETTINGS
 # ════════════════════════════════════════
 elif page == '⚙️ Settings':
     st.title('⚙️ Settings')

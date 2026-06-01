@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 import pandas as pd
 
@@ -16,6 +16,7 @@ class Signal:
     target2: float
     reason: str
     rules_passed: dict
+    hold_plan: dict = field(default_factory=dict)
 
 
 def calculate_indicators(df) -> Optional[dict]:
@@ -28,6 +29,7 @@ def calculate_indicators(df) -> Optional[dict]:
     volume = df['Volume']
 
     ema9 = close.ewm(span=9, adjust=False).mean()
+    ema20 = close.ewm(span=20, adjust=False).mean()
     ema21 = close.ewm(span=21, adjust=False).mean()
     ema50 = close.ewm(span=50, adjust=False).mean()
     ema200 = close.ewm(span=200, adjust=False).mean()
@@ -47,9 +49,19 @@ def calculate_indicators(df) -> Optional[dict]:
     avg_vol = volume.rolling(20).mean()
     current = float(close.iloc[-1])
 
+    roc5 = (
+        (float(close.iloc[-1]) / float(close.iloc[-6]) - 1) * 100
+        if len(close) >= 6 else 0.0
+    )
+    roc20 = (
+        (float(close.iloc[-1]) / float(close.iloc[-21]) - 1) * 100
+        if len(close) >= 21 else 0.0
+    )
+
     return {
         'close': current,
         'ema9': float(ema9.iloc[-1]),
+        'ema20': float(ema20.iloc[-1]),
         'ema21': float(ema21.iloc[-1]),
         'ema50': float(ema50.iloc[-1]),
         'ema200': float(ema200.iloc[-1]),
@@ -66,6 +78,61 @@ def calculate_indicators(df) -> Optional[dict]:
         'support': float(low.rolling(20).min().iloc[-1]),
         'high_20d': float(high.rolling(20).max().iloc[-1]),
         'low_20d': float(low.rolling(20).min().iloc[-1]),
+        'roc5': round(roc5, 2),
+        'roc20': round(roc20, 2),
+    }
+
+
+def calculate_hold_plan(
+    ticker: str,
+    entry: float,
+    stop: float,
+    target1: float,
+    target2: float,
+    atr_pct: float,
+    strategy: str
+) -> dict:
+    risk_pct = abs((entry - stop) / entry * 100) if entry > 0 else 3.0
+    reward1_pct = abs((target1 - entry) / entry * 100) if entry > 0 else 8.0
+    rr_ratio = round(reward1_pct / risk_pct, 1) if risk_pct > 0 else 0.0
+
+    if atr_pct >= 3.0:
+        min_days, max_days = 2, 5
+        check_freq = 'twice daily'
+    elif atr_pct >= 2.0:
+        min_days, max_days = 3, 7
+        check_freq = 'once daily'
+    else:
+        min_days, max_days = 5, 10
+        check_freq = 'once daily'
+
+    hold_estimate = f"{min_days}-{max_days} days"
+
+    return {
+        'hold_estimate': hold_estimate,
+        'min_days': min_days,
+        'max_days': max_days,
+        'check_frequency': check_freq,
+        'risk_pct': round(risk_pct, 1),
+        'reward_pct': round(reward1_pct, 1),
+        'rr_ratio': rr_ratio,
+        'exit_rules': [
+            f"SELL ALL if price drops to "
+            f"${stop:.2f} (-{risk_pct:.1f}%)",
+            f"SELL HALF when price hits "
+            f"${target1:.2f} (+{reward1_pct:.1f}%)",
+            f"SELL REST when price hits "
+            f"${target2:.2f} or after "
+            f"{max_days} days",
+            f"Check price {check_freq} "
+            f"on Robinhood",
+        ],
+        'morning_check': (
+            f"Each morning check {ticker}:\n"
+            f"• If below ${stop:.2f} → SELL ALL\n"
+            f"• If above ${target1:.2f} → SELL HALF\n"
+            f"• If between → HOLD"
+        )
     }
 
 
@@ -106,7 +173,7 @@ def ema_trend_ride(
     entry = ind['ema21'] * 1.001
     stop = entry * 0.97
 
-    return Signal(
+    sig = Signal(
         ticker=ticker,
         action=_score_to_action(score),
         strategy='EMA_RIDE',
@@ -122,6 +189,16 @@ def ema_trend_ride(
         ),
         rules_passed=rules,
     )
+    sig.hold_plan = calculate_hold_plan(
+        ticker=ticker,
+        entry=sig.entry,
+        stop=sig.stop,
+        target1=sig.target1,
+        target2=sig.target2,
+        atr_pct=ind.get('atr_pct', 2.0),
+        strategy=sig.strategy,
+    )
+    return sig
 
 
 def breakout_confirmation(
@@ -160,7 +237,7 @@ def breakout_confirmation(
     entry = ind['resistance']
     stop = entry * 0.97
 
-    return Signal(
+    sig = Signal(
         ticker=ticker,
         action=_score_to_action(score),
         strategy='BREAKOUT',
@@ -176,6 +253,16 @@ def breakout_confirmation(
         ),
         rules_passed=rules,
     )
+    sig.hold_plan = calculate_hold_plan(
+        ticker=ticker,
+        entry=sig.entry,
+        stop=sig.stop,
+        target1=sig.target1,
+        target2=sig.target2,
+        atr_pct=ind.get('atr_pct', 2.0),
+        strategy=sig.strategy,
+    )
+    return sig
 
 
 def relative_strength_trend(
@@ -222,7 +309,7 @@ def relative_strength_trend(
     entry = ind['ema21'] * 1.001
     stop = entry * 0.97
 
-    return Signal(
+    sig = Signal(
         ticker=ticker,
         action=_score_to_action(score),
         strategy='RS_TREND',
@@ -238,6 +325,16 @@ def relative_strength_trend(
         ),
         rules_passed=rules,
     )
+    sig.hold_plan = calculate_hold_plan(
+        ticker=ticker,
+        entry=sig.entry,
+        stop=sig.stop,
+        target1=sig.target1,
+        target2=sig.target2,
+        atr_pct=ind.get('atr_pct', 2.0),
+        strategy=sig.strategy,
+    )
+    return sig
 
 
 def get_market_trend(spy_ind: Optional[dict]) -> str:
