@@ -528,6 +528,145 @@ def handle_command(text: str) -> str:
             )
             return msg
 
+        # BOUGHT — record manual buy
+        elif (
+            text.startswith('bought ') or
+            text.startswith('buy ') or
+            text.startswith('added ')
+        ):
+            parts = text.split()
+
+            if len(parts) < 4:
+                return (
+                    "Format: bought TICKER SHARES PRICE\n"
+                    "Example: bought NVDA 0.5 245.50"
+                )
+
+            ticker = parts[1].upper()
+
+            try:
+                shares = float(parts[2])
+                price = float(parts[3])
+            except Exception:
+                return (
+                    "Could not read numbers.\n"
+                    "Format: bought NVDA 0.5 245.50"
+                )
+
+            stop = round(price * 0.97, 2)
+            target1 = round(price * 1.08, 2)
+            target2 = round(price * 1.15, 2)
+            cost = round(shares * price, 2)
+
+            from backend.portfolio.tracker import (
+                PortfolioTracker
+            )
+            from backend.journal.logger import Journal
+
+            tracker = PortfolioTracker()
+            journal = Journal()
+
+            tracker.open_position(
+                ticker=ticker,
+                shares=shares,
+                entry_price=price,
+                stop_price=stop,
+                target1=target1,
+                target2=target2,
+                strategy='MANUAL',
+                notes='Entered manually via Telegram',
+            )
+
+            journal.log_trade_open(
+                ticker=ticker,
+                strategy='MANUAL',
+                shares=shares,
+                entry_price=price,
+                stop=stop,
+                target1=target1,
+                target2=target2,
+                approved_by='human_manual',
+            )
+
+            return (
+                f"✅ TRADE RECORDED\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Stock: {ticker}\n"
+                f"Shares: {shares}\n"
+                f"Entry: ${price:.2f}\n"
+                f"Total: ${cost:.2f}\n\n"
+                f"AUTO SET:\n"
+                f"Stop loss: ${stop:.2f} (-3%)\n"
+                f"Target 1: ${target1:.2f} (+8%)\n"
+                f"Target 2: ${target2:.2f} (+15%)\n\n"
+                f"Bot will monitor and alert you!\n"
+                f"Daily updates at 10am EST"
+            )
+
+        # SOLD — record manual sell
+        elif (
+            text.startswith('sold ') or
+            text.startswith('sell ') or
+            text.startswith('exited ')
+        ):
+            parts = text.split()
+
+            if len(parts) < 4:
+                return (
+                    "Format: sold TICKER SHARES PRICE\n"
+                    "Example: sold NVDA 0.25 261.00"
+                )
+
+            ticker = parts[1].upper()
+
+            try:
+                shares = float(parts[2])
+                price = float(parts[3])
+            except Exception:
+                return (
+                    "Could not read numbers.\n"
+                    "Format: sold NVDA 0.25 261.00"
+                )
+
+            from backend.portfolio.tracker import (
+                PortfolioTracker
+            )
+            from backend.journal.logger import Journal
+
+            tracker = PortfolioTracker()
+            journal = Journal()
+
+            result = tracker.close_position(
+                ticker, price, 'manual_exit'
+            )
+
+            journal.log_trade_close(
+                ticker, price, 'manual_exit'
+            )
+
+            if result:
+                pnl = result.get('pnl', 0)
+                pnl_pct = result.get('pnl_pct', 0)
+                emoji = '✅' if pnl >= 0 else '❌'
+
+                return (
+                    f"{emoji} TRADE CLOSED\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"Stock: {ticker}\n"
+                    f"Shares: {shares}\n"
+                    f"Exit: ${price:.2f}\n\n"
+                    f"RESULT:\n"
+                    f"PnL: ${pnl:+.2f}\n"
+                    f"Return: {pnl_pct:+.1f}%\n\n"
+                    f"{'Great trade! 🎉' if pnl > 0 else 'Take the lesson. Next one. 💪'}"
+                )
+            else:
+                return (
+                    f"Could not find open position "
+                    f"for {ticker}.\n"
+                    f"Check portfolio: text portfolio"
+                )
+
         # HELP
         elif text in (
             'help', '/help', '/start', 'menu'
@@ -535,27 +674,31 @@ def handle_command(text: str) -> str:
             return (
                 "⚡ SENTINEL COMMANDS\n"
                 "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🤖 BOT CONTROLS\n"
+                "start — Start the bot\n"
+                "stop — Stop the bot\n"
+                "pause — Pause (manual mode)\n"
+                "resume — Resume (auto mode)\n"
+                "restart — Restart bot\n"
+                "status — Bot health check\n\n"
                 "📡 SCANNING\n"
                 "scan — Scan all watchlist stocks\n"
-                "discover — Find new opportunities\n"
                 "top3 — Best 3 right now\n"
-                "watchlist — Show your watchlist\n\n"
+                "discover — Find new opportunities\n"
+                "watchlist — Your scan list\n\n"
                 "📊 ANALYSIS\n"
                 "analyze NVDA — Analyze any stock\n"
-                "holdings — Check your stock positions\n"
-                "portfolio — Budget and positions\n"
+                "holdings — Your positions status\n"
+                "portfolio — Budget + positions\n"
+                "budget — Budget status\n"
                 "stats — Performance numbers\n\n"
+                "📱 MANUAL TRADES\n"
+                "bought NVDA 0.5 245.50 — Record buy\n"
+                "sold NVDA 0.25 261.00 — Record sell\n\n"
                 "🎯 GOALS\n"
                 "goal — Car fund progress\n\n"
-                "⚙️ CONTROLS\n"
-                "pause — Pause scanning\n"
-                "resume — Resume scanning\n"
-                "budget — Show current budget\n"
-                "status — Bot health check\n\n"
-                "📱 DASHBOARD\n"
-                "http://localhost:8501\n\n"
                 "━━━━━━━━━━━━━━━━━━━━\n"
-                "Text any command anytime!"
+                "Dashboard: http://localhost:8501"
             )
 
         else:
