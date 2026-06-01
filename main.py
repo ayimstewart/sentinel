@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import threading
 import schedule
 from datetime import datetime
 
@@ -26,6 +27,7 @@ from backend.configs.symbols import (
     ETF_LONG_TERM,
     get_sector,
 )
+from backend.telegram.handler import start_listener
 
 logging.basicConfig(
     level=logging.INFO,
@@ -388,6 +390,14 @@ def run_bot():
         f"Morning brief at 9am EST\n"
         f"Dashboard: http://localhost:8501"
     )
+
+    # Start Telegram command listener
+    telegram_thread = threading.Thread(
+        target=start_listener,
+        daemon=True
+    )
+    telegram_thread.start()
+    logger.info("Telegram listener active")
 
     run_scan()
 
