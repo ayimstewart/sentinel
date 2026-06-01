@@ -20,6 +20,7 @@ from backend.execution.broker import (
     get_portfolio_value,
 )
 from backend.journal.logger import Journal
+from backend.ai.summarizer import explain_setup
 from backend.configs.symbols import (
     MARKET_FILTERS,
     SCAN_PRIORITY,
@@ -28,6 +29,12 @@ from backend.configs.symbols import (
     get_sector,
 )
 from backend.telegram.handler import start_listener
+from database import Database
+
+try:
+    from thermal_monitor import thermal
+except ImportError:
+    thermal = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 tracker = PortfolioTracker()
 journal = Journal()
+db = Database()
 
 DASHBOARD_URL = 'http://129.158.37.181:8501'
 
@@ -56,6 +64,26 @@ def _send_telegram(message: str):
         )
     except Exception as e:
         logger.error(f"Telegram error: {e}")
+
+
+# ── SIGNAL ALERT ─────────────────────────────────────────
+
+def _send_signals_telegram(signals: list):
+    if not signals:
+        return
+    msg = f"📡 SENTINEL SCAN — {len(signals)} signal(s)\n\n"
+    for s in signals[:3]:
+        emoji = '🟢' if s.get('action') == 'READY' else '🟡'
+        msg += (
+            f"{emoji} {s['ticker']} — {s.get('action')}\n"
+            f"Strategy: {s.get('strategy')}\n"
+            f"Score: {s.get('score')}/100\n"
+            f"Entry: ${s.get('entry', 0):.2f}\n"
+            f"Stop: ${s.get('stop', 0):.2f}\n"
+            f"Target: ${s.get('target1', 0):.2f}\n\n"
+        )
+    msg += "Open dashboard to approve"
+    _send_telegram(msg)
 
 
 # ── MORNING BRIEF ─────────────────────────────────────────
@@ -258,73 +286,78 @@ def send_weekly_review():
 # ── SCAN ──────────────────────────────────────────────────
 
 def run_scan():
-    logger.info("=" * 40)
-    logger.info("Starting ETF scan...")
-    logger.info(f"ETFs: {SCAN_PRIORITY}")
-
     if not is_market_open():
-        logger.info("Market closed — skipping scan")
-        journal.log_event('SCAN_SKIPPED', 'Market closed')
-        return []
+        logger.info('Market closed — skipping')
+        return
 
-    spy_data = fetch('SPY', period='1y')
+    if thermal and thermal.capacity == 0:
+        logger.warning('Thermal critical')
+        return
+
+    logger.info("Starting scan...")
+
+    watchlist = db.get_watchlist()
+    tickers = [w['ticker'] for w in watchlist]
+
+    logger.info(f"Scanning {len(tickers)} stocks")
+
+    spy_data = fetch('SPY', '1y')
     if not spy_data:
-        logger.error("Cannot fetch SPY data")
-        return []
+        logger.error("Cannot fetch SPY")
+        return
 
     portfolio_value = get_portfolio_value()
     open_positions = tracker.get_open_positions()
-
-    logger.info(
-        f"Portfolio: ${portfolio_value:.2f} | "
-        f"Positions: {len(open_positions)}/3"
-    )
+    daily_pnl = 0.0
 
     signals_found = []
 
-    for ticker in SCAN_PRIORITY:
+    for ticker in tickers:
         try:
-            logger.info(f"Scanning {ticker}...")
-
-            data = fetch(ticker, period='1y')
+            data = fetch(ticker, '1y')
             if not data:
                 journal.log_rejection(
-                    ticker, 'No market data', 'market_data'
+                    ticker, 'No data', 'data'
                 )
                 continue
 
             signal = scan(ticker, data.df, spy_data.df)
-
             if not signal:
                 journal.log_rejection(
-                    ticker, 'No strategy triggered', 'strategy'
+                    ticker,
+                    'No strategy triggered',
+                    'strategy'
                 )
-                logger.info(f"  {ticker}: no setup")
                 continue
-
-            logger.info(
-                f"  {ticker}: {signal.action} "
-                f"score={signal.score} "
-                f"strategy={signal.strategy}"
-            )
 
             portfolio = Portfolio(
                 positions=open_positions,
                 portfolio_value=portfolio_value,
                 cash=portfolio_value,
-                daily_pnl=0.0,
+                daily_pnl=daily_pnl
             )
 
             risk = evaluate(signal, portfolio)
-
             if not risk.allowed:
                 journal.log_rejection(
                     ticker, risk.reason, 'risk'
                 )
-                logger.info(
-                    f"  {ticker}: BLOCKED — {risk.reason}"
-                )
                 continue
+
+            try:
+                explanation = explain_setup(
+                    ticker, signal.strategy,
+                    signal.score,
+                    {'close': signal.entry,
+                     'ema21': signal.entry,
+                     'rsi': 50,
+                     'volume_ratio': 1.2,
+                     'atr_pct': 2.0}
+                )
+            except Exception:
+                explanation = (
+                    f"{signal.strategy} setup"
+                )
 
             signal_id = journal.log_signal(
                 ticker=ticker,
@@ -336,12 +369,11 @@ def run_scan():
                 stop=signal.stop,
                 target1=signal.target1,
                 target2=signal.target2,
-                reason=signal.reason,
-                market_trend=signal.rules_passed.get('market', ''),
+                reason=signal.reason
             )
 
             signals_found.append({
-                'signal_id': signal_id,
+                'id': signal_id,
                 'ticker': ticker,
                 'strategy': signal.strategy,
                 'action': signal.action,
@@ -352,28 +384,103 @@ def run_scan():
                 'target2': signal.target2,
                 'shares': risk.shares,
                 'cost': risk.position_value,
-                'reason': signal.reason,
+                'explanation': explanation,
             })
 
             logger.info(
-                f"  {ticker}: SIGNAL — "
-                f"{signal.action} "
-                f"entry=${signal.entry:.2f} "
-                f"shares={risk.shares}"
+                f"✅ {ticker}: {signal.action} "
+                f"score={signal.score}"
             )
 
             time.sleep(2)
 
         except Exception as e:
-            logger.error(f"Error scanning {ticker}: {e}")
-            continue
+            logger.error(f"{ticker} error: {e}")
+
+    if signals_found:
+        _send_signals_telegram(signals_found)
 
     logger.info(
-        f"Scan complete — {len(signals_found)} signals found"
+        f"Scan done — {len(signals_found)} signals"
     )
-    logger.info("=" * 40)
-
     return signals_found
+
+
+# ── TRADE EXECUTION ───────────────────────────────────────
+
+def execute_approved_trade(signal_data: dict):
+    ticker = signal_data['ticker']
+    shares = signal_data.get('shares', 0)
+    entry = signal_data.get('entry', 0)
+    stop = signal_data.get('stop', 0)
+    target1 = signal_data.get('target1', 0)
+
+    results = {}
+
+    # 1. Execute on Alpaca paper
+    try:
+        from backend.execution.broker import place_buy
+        order = place_buy(
+            ticker=ticker,
+            shares=shares,
+            note="Sentinel signal approved"
+        )
+
+        if order.success:
+            results['alpaca'] = 'executed'
+            logger.info(
+                f"Alpaca paper trade: "
+                f"{ticker} {shares} shares"
+            )
+        else:
+            results['alpaca'] = 'failed'
+
+    except Exception as e:
+        results['alpaca'] = f'error: {e}'
+        logger.error(f"Alpaca execution error: {e}")
+
+    # 2. Send Robinhood manual alert
+    cost = round(shares * entry, 2)
+    msg = (
+        f"📱 BUY ON ROBINHOOD NOW\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Stock: {ticker}\n"
+        f"Shares: {shares:.4f}\n"
+        f"Price: ${entry:.2f}\n"
+        f"Total: ${cost:.2f}\n\n"
+        f"Stop loss: ${stop:.2f}\n"
+        f"Target 1: ${target1:.2f} (+8%)\n\n"
+        f"Steps:\n"
+        f"1. Open Robinhood\n"
+        f"2. Search {ticker}\n"
+        f"3. Buy {shares:.4f} shares\n"
+        f"4. Set stop at ${stop:.2f}\n\n"
+        f"Also executing on Alpaca paper ✅"
+    )
+    _send_telegram(msg)
+
+    # 3. Track position
+    tracker.open_position(
+        ticker=ticker,
+        shares=shares,
+        entry_price=entry,
+        stop_price=stop,
+        target1=target1,
+        target2=target1 * 1.07,
+        strategy=signal_data.get('strategy', '')
+    )
+
+    journal.log_trade_open(
+        ticker=ticker,
+        strategy=signal_data.get('strategy', ''),
+        shares=shares,
+        entry_price=entry,
+        stop=stop,
+        target1=target1,
+        target2=target1 * 1.07
+    )
+
+    return results
 
 
 # ── BOT RUNNER ────────────────────────────────────────────

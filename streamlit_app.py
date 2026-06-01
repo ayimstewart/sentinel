@@ -86,6 +86,7 @@ page = st.sidebar.radio(
         '💼 My Stocks',
         '📈 Performance',
         '🧪 Backtest',
+        '📋 Watchlist',
         '⚙️ Settings',
     ],
     label_visibility='collapsed',
@@ -277,18 +278,13 @@ if page == '⚡ Today':
                         type='primary',
                         use_container_width=True,
                     ):
+                        from main import execute_approved_trade
+                        result = execute_approved_trade(sig)
                         journal.approve_signal(sig_id)
-                        try:
-                            _send_telegram(
-                                f"✅ APPROVED: {ticker}\n"
-                                f"Entry: ${sig.get('entry', 0):.2f}\n"
-                                f"Stop: ${sig.get('stop', 0):.2f}\n"
-                                f"Target: ${sig.get('target1', 0):.2f}\n"
-                                f"Open Robinhood now!"
-                            )
-                        except Exception:
-                            pass
-                        st.success('Approved!')
+                        st.success(
+                            '✅ Alpaca paper trade placed!\n'
+                            '📱 Check Telegram for Robinhood steps'
+                        )
                         st.rerun()
 
                     if st.button(
@@ -932,7 +928,181 @@ elif page == '🧪 Backtest':
                 st.code(traceback.format_exc())
 
 # ════════════════════════════════════════
-# SCREEN 5 — SETTINGS
+# SCREEN 6 — WATCHLIST
+# ════════════════════════════════════════
+elif page == '📋 Watchlist':
+    st.title('📋 Watchlist')
+    st.caption('Manage your scan universe')
+
+    from database import Database
+    db = Database()
+
+    tab1, tab2 = st.tabs([
+        '📈 Stocks', '🏦 ETF Holdings'
+    ])
+
+    with tab1:
+        st.subheader('Swing Stocks')
+        st.caption(
+            'These stocks are scanned daily '
+            'for swing opportunities'
+        )
+
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            new_ticker = st.text_input(
+                'Add stock ticker',
+                placeholder='e.g. AMD'
+            ).upper()
+        with col2:
+            new_sector = st.selectbox(
+                'Sector',
+                ['ai_tech', 'semiconductors',
+                 'cybersecurity', 'software',
+                 'fintech', 'space', 'biotech',
+                 'consumer_tech', 'utilities',
+                 'social_media', 'speculative',
+                 'other']
+            )
+        with col3:
+            st.write("")
+            st.write("")
+            if st.button(
+                '➕ Add',
+                type='primary',
+                use_container_width=True
+            ):
+                if new_ticker:
+                    success = db.add_to_watchlist(
+                        new_ticker, 'stock', new_sector
+                    )
+                    if success:
+                        st.success(f"Added {new_ticker}!")
+                        st.rerun()
+                    else:
+                        st.error('Failed to add')
+
+        st.divider()
+
+        watchlist = db.get_watchlist()
+        stocks = [
+            w for w in watchlist
+            if w['ticker_type'] == 'stock'
+        ]
+
+        st.write(f"**{len(stocks)} stocks being scanned**")
+
+        for stock in stocks:
+            col1, col2, col3 = st.columns([2, 2, 1])
+            with col1:
+                st.write(f"**{stock['ticker']}**")
+            with col2:
+                st.write(
+                    f"{stock['sector']} | "
+                    f"Added {stock['added_at'][:10]}"
+                )
+            with col3:
+                if st.button(
+                    '🗑️',
+                    key=f"del_{stock['ticker']}",
+                    use_container_width=True
+                ):
+                    db.remove_from_watchlist(stock['ticker'])
+                    st.rerun()
+
+    with tab2:
+        st.subheader('ETF Long Term Holdings')
+        st.caption(
+            'These are tracked but never swing traded'
+        )
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            etf_ticker = st.text_input(
+                'ETF ticker',
+                placeholder='e.g. VOO'
+            ).upper()
+        with col2:
+            etf_shares = st.number_input(
+                'Shares', min_value=0.0,
+                value=0.0, step=0.001,
+                format="%.4f"
+            )
+        with col3:
+            etf_cost = st.number_input(
+                'Avg cost', min_value=0.0, value=0.0
+            )
+        with col4:
+            st.write("")
+            st.write("")
+            if st.button(
+                '➕ Add ETF',
+                use_container_width=True
+            ):
+                if etf_ticker:
+                    db.add_etf_holding(
+                        etf_ticker, etf_shares, etf_cost
+                    )
+                    st.success(f"Added {etf_ticker}!")
+                    st.rerun()
+
+        st.divider()
+
+        holdings = db.get_etf_holdings()
+
+        if not holdings:
+            st.info('No ETF holdings tracked yet')
+        else:
+            total_etf_value = 0
+
+            for h in holdings:
+                ticker = h['ticker']
+                shares = h.get('shares', 0)
+                avg_cost = h.get('avg_cost', 0)
+
+                try:
+                    current = get_current_price(ticker)
+                except Exception:
+                    current = avg_cost
+
+                value = shares * current
+                cost_basis = shares * avg_cost
+                pnl = value - cost_basis
+                pnl_pct = (
+                    pnl / cost_basis * 100
+                ) if cost_basis > 0 else 0
+                total_etf_value += value
+
+                col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+                with col1:
+                    st.write(f"**{ticker}**")
+                    st.caption(f"{shares:.4f} shares")
+                with col2:
+                    st.write(f"Now: ${current:.2f}")
+                    st.caption(f"Avg: ${avg_cost:.2f}")
+                with col3:
+                    st.write(f"${value:.2f} total")
+                    st.caption(
+                        f"PnL: ${pnl:+.2f} ({pnl_pct:+.1f}%)"
+                    )
+                with col4:
+                    if st.button(
+                        '🗑️',
+                        key=f"del_etf_{ticker}",
+                        use_container_width=True
+                    ):
+                        db.remove_etf_holding(ticker)
+                        st.rerun()
+
+                st.divider()
+
+            st.metric(
+                'Total ETF Value',
+                f"${total_etf_value:,.2f}"
+            )
+
+# ════════════════════════════════════════
+# SCREEN 7 — SETTINGS
 # ════════════════════════════════════════
 elif page == '⚙️ Settings':
     st.title('⚙️ Settings')

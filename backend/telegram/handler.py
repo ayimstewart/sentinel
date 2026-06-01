@@ -49,15 +49,18 @@ def handle_command(text: str) -> str:
     try:
         # SCAN
         if text in ('scan', '/scan'):
-            send("🔍 Scanning 43 tickers...")
+            send("🔍 Scanning watchlist...")
             from backend.market_data.fetcher import fetch
             from backend.strategies.scanner import scan
-            from backend.configs.symbols import SCAN_PRIORITY
+            from database import Database
+            db = Database()
+            watchlist = db.get_watchlist()
+            tickers = [w['ticker'] for w in watchlist]
 
             spy = fetch('SPY', '1y')
             signals = []
 
-            for ticker in SCAN_PRIORITY[:20]:
+            for ticker in tickers[:20]:
                 data = fetch(ticker, '1y')
                 if data and spy:
                     signal = scan(
