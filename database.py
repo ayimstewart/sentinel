@@ -143,3 +143,18 @@ class Database:
             conn.execute("""
                 DELETE FROM etf_holdings WHERE ticker = ?
             """, (ticker.upper(),))
+
+    # ── SWING POSITIONS ───────────────────
+
+    def get_swing_positions(self) -> list:
+        try:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("""
+                    SELECT * FROM positions
+                    WHERE status = 'open'
+                    ORDER BY entry_date DESC
+                """)
+                return [dict(r) for r in cursor]
+        except Exception:
+            return []

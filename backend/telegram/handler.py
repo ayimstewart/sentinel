@@ -308,20 +308,254 @@ def handle_command(text: str) -> str:
                 "Scanning every 45 minutes"
             )
 
-        # HELP
-        elif text in ('help', '/help', '/start'):
+        # WATCHLIST
+        elif text in ('watchlist', '/watchlist'):
+            from database import Database
+            db = Database()
+            watchlist = db.get_watchlist()
+
+            if not watchlist:
+                return (
+                    "Watchlist is empty. "
+                    "Add stocks on dashboard."
+                )
+
+            msg = (
+                f"📋 YOUR WATCHLIST "
+                f"({len(watchlist)} stocks)\n\n"
+            )
+
+            sectors = {}
+            for w in watchlist:
+                sector = w.get('sector', 'other')
+                if sector not in sectors:
+                    sectors[sector] = []
+                sectors[sector].append(w['ticker'])
+
+            for sector, tickers in sectors.items():
+                msg += f"{sector}:\n"
+                msg += f"  {', '.join(tickers)}\n"
+
+            msg += "\nAdd/remove on dashboard"
+            return msg
+
+        # HOLDINGS
+        elif text in (
+            'holdings', '/holdings', 'mystocks'
+        ):
+            from database import Database
+            from backend.market_data.fetcher import fetch
+            from backend.strategies.scanner import (
+                scan, calculate_indicators
+            )
+
+            db = Database()
+            positions = db.get_swing_positions()
+
+            if not positions:
+                return (
+                    "No active positions tracked.\n"
+                    "Add positions on dashboard."
+                )
+
+            spy = fetch('SPY', '1y')
+            msg = (
+                "💼 YOUR POSITIONS\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+            )
+
+            for pos in positions:
+                ticker = pos['ticker']
+                entry = pos.get('entry_price', 0)
+                stop = pos.get('stop_price', 0)
+                target1 = pos.get('target1', 0)
+
+                data = fetch(ticker, '1y')
+                if not data:
+                    continue
+
+                ind = calculate_indicators(data.df)
+                current = (
+                    ind['close'] if ind else entry
+                )
+                signal = (
+                    scan(ticker, data.df, spy.df)
+                    if spy else None
+                )
+
+                pnl_pct = (
+                    (current - entry) / entry * 100
+                ) if entry > 0 else 0
+
+                if current <= stop * 1.02:
+                    rec = "⚠️ EXIT — Near stop loss"
+                elif current >= target1 * 0.98:
+                    rec = "🎯 SELL HALF — Target reached"
+                elif (signal and
+                      signal.action == 'READY'):
+                    rec = "💪 HOLD — Strong setup"
+                elif ind and ind['close'] > ind['ema21']:
+                    rec = "✅ HOLD — Trend intact"
+                else:
+                    rec = "⚠️ WATCH — Weakening"
+
+                msg += (
+                    f"{ticker}\n"
+                    f"Entry: ${entry:.2f} → "
+                    f"Now: ${current:.2f}\n"
+                    f"PnL: {pnl_pct:+.1f}%\n"
+                    f"Stop: ${stop:.2f} | "
+                    f"Target: ${target1:.2f}\n"
+                    f"👉 {rec}\n\n"
+                )
+
+            return msg
+
+        # BUDGET
+        elif text in ('budget', '/budget'):
+            from dotenv import load_dotenv
+            load_dotenv(
+                os.path.expanduser('~/sentinel/.env')
+            )
+            from database import Database
+            from backend.portfolio.tracker import (
+                PortfolioTracker
+            )
+
+            tracker = PortfolioTracker()
+            budget = float(
+                os.getenv('SWING_BUDGET', '0')
+            )
+            positions = tracker.get_open_positions()
+            deployed = sum(
+                p.get('shares', 0) *
+                p.get('entry_price', 0)
+                for p in positions
+            )
+            available = max(budget - deployed, 0)
+
+            if budget == 0:
+                status = "⚠️ No budget set — scanning only"
+            elif available == 0:
+                status = "🔴 Budget fully deployed"
+            elif available < budget * 0.33:
+                status = "🟡 Limited budget remaining"
+            else:
+                status = "🟢 Budget available"
+
             return (
-                "⚡ SENTINEL COMMANDS\n\n"
-                "scan — Run full market scan\n"
-                "top3 — Best 3 opportunities\n"
+                f"💰 BUDGET STATUS\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Total budget: ${budget:.0f}\n"
+                f"Deployed: ${deployed:.2f}\n"
+                f"Available: ${available:.2f}\n\n"
+                f"Status: {status}\n\n"
+                f"Positions: {len(positions)}/3"
+            )
+
+        # STATUS
+        elif text in ('status', '/status'):
+            from backend.execution.broker import (
+                get_account, is_market_open
+            )
+
+            account = get_account()
+            market = is_market_open()
+
+            try:
+                import ollama
+                ollama.list()
+                ai_status = "🟢 Online"
+            except Exception:
+                ai_status = "🔴 Offline"
+
+            alpaca_status = (
+                f"🟢 ${float(account['portfolio_value']):,.0f}"
+                if account else "🔴 Offline"
+            )
+
+            return (
+                f"⚡ SENTINEL STATUS\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Market: "
+                f"{'🟢 OPEN' if market else '🔴 CLOSED'}\n"
+                f"Alpaca: {alpaca_status}\n"
+                f"AI: {ai_status}\n\n"
+                f"Scanning: every 45 min\n"
+                f"Morning brief: 9am EST\n"
+                f"Exit alerts: every 30 min\n\n"
+                f"Dashboard: http://localhost:8501"
+            )
+
+        # DISCOVER
+        elif text in ('discover', '/discover'):
+            send(
+                "🔍 Running discovery scan...\n"
+                "This takes 2-3 minutes."
+            )
+
+            from backend.strategies.discovery import (
+                discover_opportunities
+            )
+            from backend.market_data.fetcher import fetch
+
+            discoveries = discover_opportunities(
+                fetch, min_score=70, max_results=5
+            )
+
+            if not discoveries:
+                return (
+                    "No strong discoveries right now."
+                )
+
+            msg = "🔍 TOP DISCOVERIES\n\n"
+            for d in discoveries:
+                emoji = (
+                    '🟢' if d.action == 'READY'
+                    else '🟡'
+                )
+                msg += (
+                    f"{emoji} {d.ticker} "
+                    f"— {d.score}/100\n"
+                    f"  {d.reason}\n"
+                    f"  RSI: {d.rsi:.0f} | "
+                    f"RS: {d.rs_vs_spy:+.1f}%\n\n"
+                )
+
+            msg += (
+                "\nAdd these on dashboard:\n"
+                "http://localhost:8501"
+            )
+            return msg
+
+        # HELP
+        elif text in (
+            'help', '/help', '/start', 'menu'
+        ):
+            return (
+                "⚡ SENTINEL COMMANDS\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "📡 SCANNING\n"
+                "scan — Scan all watchlist stocks\n"
+                "discover — Find new opportunities\n"
+                "top3 — Best 3 right now\n"
+                "watchlist — Show your watchlist\n\n"
+                "📊 ANALYSIS\n"
                 "analyze NVDA — Analyze any stock\n"
-                "portfolio — Your positions\n"
-                "stats — Performance stats\n"
-                "goal — Car fund progress\n"
-                "pause — Stop scanning\n"
-                "resume — Start scanning\n"
-                "help — Show this menu\n\n"
-                "Dashboard: http://localhost:8501"
+                "holdings — Check your stock positions\n"
+                "portfolio — Budget and positions\n"
+                "stats — Performance numbers\n\n"
+                "🎯 GOALS\n"
+                "goal — Car fund progress\n\n"
+                "⚙️ CONTROLS\n"
+                "pause — Pause scanning\n"
+                "resume — Resume scanning\n"
+                "budget — Show current budget\n"
+                "status — Bot health check\n\n"
+                "📱 DASHBOARD\n"
+                "http://localhost:8501\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "Text any command anytime!"
             )
 
         else:

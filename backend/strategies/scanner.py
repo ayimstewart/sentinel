@@ -97,13 +97,13 @@ def calculate_hold_plan(
     rr_ratio = round(reward1_pct / risk_pct, 1) if risk_pct > 0 else 0.0
 
     if atr_pct >= 3.0:
-        min_days, max_days = 2, 5
+        min_days, max_days = 2, 7
         check_freq = 'twice daily'
     elif atr_pct >= 2.0:
-        min_days, max_days = 3, 7
+        min_days, max_days = 3, 10
         check_freq = 'once daily'
     else:
-        min_days, max_days = 5, 10
+        min_days, max_days = 5, 14
         check_freq = 'once daily'
 
     hold_estimate = f"{min_days}-{max_days} days"
@@ -121,9 +121,9 @@ def calculate_hold_plan(
             f"${stop:.2f} (-{risk_pct:.1f}%)",
             f"SELL HALF when price hits "
             f"${target1:.2f} (+{reward1_pct:.1f}%)",
-            f"SELL REST when price hits "
-            f"${target2:.2f} or after "
-            f"{max_days} days",
+            f"SELL REST when price hits ${target2:.2f} "
+            f"or hold maximum {max_days} days "
+            f"(up to 2 weeks for slow movers)",
             f"Check price {check_freq} "
             f"on Robinhood",
         ],

@@ -309,41 +309,110 @@ def send_weekly_review():
 
 def run_scan():
     if not is_market_open():
-        logger.info('Market closed — skipping')
+        logger.info('Market closed')
         return
 
     if thermal and thermal.capacity == 0:
         logger.warning('Thermal critical')
         return
 
-    logger.info("Starting scan...")
+    budget = float(os.getenv('SWING_BUDGET', '0'))
+    open_positions = tracker.get_open_positions()
+    deployed = sum(
+        p.get('shares', 0) * p.get('entry_price', 0)
+        for p in open_positions
+    )
+    available = max(budget - deployed, 0)
+    budget_available = available > 10
 
     watchlist = db.get_watchlist()
-    tickers = [w['ticker'] for w in watchlist]
+    all_tickers = [w['ticker'] for w in watchlist]
+    position_tickers = [
+        p['ticker'] for p in open_positions
+    ]
 
-    logger.info(f"Scanning {len(tickers)} stocks")
+    if not budget_available:
+        logger.info(
+            "Budget depleted — monitoring "
+            "existing positions only"
+        )
+        scan_tickers = position_tickers
+        new_trades_allowed = False
+    else:
+        scan_tickers = all_tickers
+        new_trades_allowed = True
+
+    logger.info(
+        f"Scanning {len(scan_tickers)} stocks "
+        f"(budget: ${available:.0f} available, "
+        f"new trades: {new_trades_allowed})"
+    )
 
     spy_data = fetch('SPY', '1y')
     if not spy_data:
         logger.error("Cannot fetch SPY")
         return
 
-    portfolio_value = get_portfolio_value()
-    open_positions = tracker.get_open_positions()
-    daily_pnl = 0.0
+    from backend.strategies.scanner import (
+        scan as _scan,
+        calculate_indicators,
+        calculate_hold_plan,
+    )
+    from backend.risk.engine import evaluate, Portfolio
 
     signals_found = []
+    position_updates = []
 
-    for ticker in tickers:
+    for ticker in scan_tickers:
         try:
             data = fetch(ticker, '1y')
             if not data:
-                journal.log_rejection(
-                    ticker, 'No data', 'data'
-                )
                 continue
 
-            signal = scan(ticker, data.df, spy_data.df)
+            ind = calculate_indicators(data.df)
+            signal = _scan(ticker, data.df, spy_data.df)
+            current_price = ind['close'] if ind else 0
+
+            # Monitor existing positions
+            if ticker in position_tickers:
+                pos = next(
+                    p for p in open_positions
+                    if p['ticker'] == ticker
+                )
+                entry = pos.get('entry_price', 0)
+                stop = pos.get('stop_price', 0)
+                target1 = pos.get('target1', 0)
+                pnl_pct = (
+                    (current_price - entry) /
+                    entry * 100
+                ) if entry > 0 else 0
+
+                if current_price <= stop * 1.02:
+                    rec, urgency = 'EXIT', 'HIGH'
+                elif current_price >= target1 * 0.98:
+                    rec, urgency = 'SELL_HALF', 'HIGH'
+                elif (signal and
+                      signal.action == 'READY'):
+                    rec, urgency = 'HOLD_STRONG', 'LOW'
+                elif ind and ind['close'] > ind['ema21']:
+                    rec, urgency = 'HOLD', 'LOW'
+                else:
+                    rec, urgency = 'WATCH', 'MEDIUM'
+
+                position_updates.append({
+                    'ticker': ticker,
+                    'current': current_price,
+                    'pnl_pct': pnl_pct,
+                    'recommendation': rec,
+                    'urgency': urgency,
+                    'stop': stop,
+                    'target1': target1,
+                })
+                continue
+
+            if not new_trades_allowed:
+                continue
+
             if not signal:
                 journal.log_rejection(
                     ticker,
@@ -354,9 +423,9 @@ def run_scan():
 
             portfolio = Portfolio(
                 positions=open_positions,
-                portfolio_value=portfolio_value,
-                cash=portfolio_value,
-                daily_pnl=daily_pnl
+                portfolio_value=budget,
+                cash=available,
+                daily_pnl=0.0
             )
 
             risk = evaluate(signal, portfolio)
@@ -366,19 +435,27 @@ def run_scan():
                 )
                 continue
 
+            hold_plan = calculate_hold_plan(
+                ticker=ticker,
+                entry=signal.entry,
+                stop=signal.stop,
+                target1=signal.target1,
+                target2=signal.target2,
+                atr_pct=(
+                    ind.get('atr_pct', 2.0)
+                    if ind else 2.0
+                ),
+                strategy=signal.strategy,
+            )
+
             try:
                 explanation = explain_setup(
                     ticker, signal.strategy,
-                    signal.score,
-                    {'close': signal.entry,
-                     'ema21': signal.entry,
-                     'rsi': 50,
-                     'volume_ratio': 1.2,
-                     'atr_pct': 2.0}
+                    signal.score, ind or {}
                 )
             except Exception:
                 explanation = (
-                    f"{signal.strategy} setup"
+                    f"{signal.strategy} setup detected"
                 )
 
             signal_id = journal.log_signal(
@@ -391,7 +468,7 @@ def run_scan():
                 stop=signal.stop,
                 target1=signal.target1,
                 target2=signal.target2,
-                reason=signal.reason
+                reason=signal.reason,
             )
 
             signals_found.append({
@@ -407,7 +484,7 @@ def run_scan():
                 'shares': risk.shares,
                 'cost': risk.position_value,
                 'explanation': explanation,
-                'hold_plan': signal.hold_plan,
+                'hold_plan': hold_plan,
             })
 
             logger.info(
@@ -418,15 +495,49 @@ def run_scan():
             time.sleep(2)
 
         except Exception as e:
-            logger.error(f"{ticker} error: {e}")
+            logger.error(f"{ticker}: {e}")
+
+    urgent = [
+        p for p in position_updates
+        if p['urgency'] == 'HIGH'
+    ]
+    for update in urgent:
+        _send_position_alert(update)
 
     if signals_found:
         _send_signals_telegram(signals_found)
 
     logger.info(
-        f"Scan done — {len(signals_found)} signals"
+        f"Scan done — {len(signals_found)} new "
+        f"signals, {len(position_updates)} positions "
+        f"monitored"
     )
     return signals_found
+
+
+def _send_position_alert(update: dict):
+    ticker = update['ticker']
+    rec = update['recommendation']
+    pnl = update['pnl_pct']
+
+    if rec == 'EXIT':
+        msg = (
+            f"🛑 EXIT NOW — {ticker}\n"
+            f"Price near stop loss\n"
+            f"PnL: {pnl:+.1f}%\n\n"
+            f"Open Robinhood → SELL ALL {ticker}"
+        )
+    elif rec == 'SELL_HALF':
+        msg = (
+            f"🎯 TARGET HIT — {ticker}\n"
+            f"PnL: {pnl:+.1f}%\n\n"
+            f"Open Robinhood → SELL HALF {ticker}\n"
+            f"Move stop to breakeven"
+        )
+    else:
+        return
+
+    _send_telegram(msg)
 
 
 # ── TRADE EXECUTION ───────────────────────────────────────
