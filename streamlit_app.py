@@ -1184,7 +1184,30 @@ elif page == '💬 Assistant':
     # Display messages
     for msg in st.session_state.messages[-20:]:
         with st.chat_message(msg['role']):
-            st.write(msg['content'])
+            content = msg['content']
+
+            # Mass analysis: multiple stocks separated by === lines
+            if '=' * 10 in content and \
+               content.count('SHORT TERM') > 1:
+
+                stocks = content.split('=' * 35)
+                stocks = [s.strip() for s in stocks
+                          if s.strip() and '$' in s]
+
+                for stock_result in stocks:
+                    lines = stock_result.split('\n')
+                    ticker_line = lines[0] if lines else ''
+                    ticker = ticker_line.replace(
+                        '📊', ''
+                    ).strip()
+
+                    with st.expander(
+                        f"📊 {ticker}",
+                        expanded=False
+                    ):
+                        st.text(stock_result)
+            else:
+                st.write(content)
 
     # Chat input
     if prompt := st.chat_input(
