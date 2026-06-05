@@ -1,0 +1,18 @@
+2026-06-05 07:51:27,449 INFO Sentinel Telegram listener started
+2026-06-05 07:51:32,915 INFO Received: analyze SNOW
+2026-06-05 07:51:33,048 INFO NumExpr defaulting to 10 threads.
+2026-06-05 07:51:38,049 INFO Fetched SNOW: 250 bars
+2026-06-05 07:51:38,885 INFO Fetched SPY: 250 bars
+2026-06-05 07:52:59,350 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 07:57:15,538 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 07:59:06,375 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:00:36,293 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:01:32,091 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:03:09,901 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:03:56,749 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:04:36,876 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:08:29,599 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:10:19,753 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:13:17,066 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:15:06,550 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
+2026-06-05 08:16:17,739 ERROR get_updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=40)
