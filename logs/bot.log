@@ -24,3 +24,14 @@
 2026-06-05 08:11:30,665 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
 2026-06-05 08:12:31,472 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
 2026-06-05 08:15:47,788 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
+2026-06-05 08:17:42,987 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
+2026-06-05 08:23:36,757 [INFO] Command received: analyze FSLR ENPH SEDG RUN SPWR BE PLUG FCEL NEE AES ORA
+2026-06-05 08:23:37,070 [INFO] Fetched ORA: 250 bars
+2026-06-05 08:23:37,295 [INFO] Fetched SPY: 250 bars
+2026-06-05 08:27:47,103 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
+2026-06-05 08:31:36,258 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
+2026-06-05 08:34:12,290 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
+2026-06-05 08:36:37,849 [INFO] Market closed
+2026-06-05 08:38:16,510 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
+2026-06-05 08:40:36,277 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
+2026-06-05 08:41:35,559 [ERROR] Get updates error: HTTPSConnectionPool(host='api.telegram.org', port=443): Read timed out. (read timeout=35)
