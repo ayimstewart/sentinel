@@ -238,32 +238,49 @@ def analyze_single(ticker: str) -> str:
 
 
 def analyze_multiple(tickers: list) -> str:
-    from backend.market_data.fetcher import fetch
-    from backend.strategies.scanner import (
-        calculate_indicators
+    if len(tickers) > 15:
+        return (
+            f"Too many ({len(tickers)}).\n"
+            f"Max 15 at once."
+        )
+
+    send(
+        f"🔍 Analyzing {len(tickers)} stocks...\n"
+        f"This takes 1-2 minutes."
     )
 
-    spy = fetch('SPY', '1y')
-    spy_ind = (
-        calculate_indicators(spy.df) if spy else None
-    )
+    all_results = []
 
-    results = []
-
-    for ticker in tickers[:8]:
+    for ticker in tickers:
         try:
-            data = fetch(ticker, '1y')
+            from backend.market_data.fetcher import fetch
+            from backend.strategies.scanner import (
+                calculate_indicators
+            )
+
+            data = fetch(ticker, '2y')
+            spy = fetch('SPY', '2y')
+
             if not data or data.df.empty:
+                all_results.append(
+                    f"⚠️ {ticker}: No data available\n"
+                )
                 continue
 
             ind = calculate_indicators(data.df)
+            spy_ind = calculate_indicators(spy.df) \
+                      if spy else None
+
             if not ind:
+                all_results.append(
+                    f"⚠️ {ticker}: Cannot calculate\n"
+                )
                 continue
 
             price = ind['close']
             rsi = ind['rsi']
 
-            # Short term score
+            # SHORT TERM SCORE
             st_score = 0
             if price > ind['ema20']: st_score += 20
             if price > ind['ema50']: st_score += 20
@@ -280,11 +297,75 @@ def analyze_multiple(tickers: list) -> str:
                 )
             if rs > 0: st_score += 10
             if rsi > 75: st_score -= 20
-            if rsi < 35: st_score -= 10
             st_score = max(0, min(100, st_score))
 
+            # LONG TERM SCORE
+            lt_score = 0
+            above_200 = price > ind['ema200']
+            ema_aligned = (
+                ind['ema20'] > ind['ema50'] >
+                ind['ema200']
+            )
+            pct_vs_200 = (
+                (price - ind['ema200']) /
+                ind['ema200'] * 100
+            )
+
+            close = data.df['Close']
+            one_yr = min(252, len(close) - 1)
+            yr_return = (
+                (price - float(close.iloc[-one_yr])) /
+                float(close.iloc[-one_yr]) * 100
+            )
+            two_yr_return = (
+                (price - float(close.iloc[0])) /
+                float(close.iloc[0]) * 100
+            )
+
+            high_52 = float(
+                data.df['High'].tail(252).max()
+            )
+            low_52 = float(
+                data.df['Low'].tail(252).min()
+            )
+            from_high = (
+                (price - high_52) / high_52 * 100
+            )
+
+            if above_200: lt_score += 35
+            if ema_aligned: lt_score += 25
+            if yr_return > 0: lt_score += 15
+            if two_yr_return > 0: lt_score += 10
+            if rsi < 70: lt_score += 10
+            if pct_vs_200 < 20: lt_score += 5
+            lt_score = max(0, min(100, lt_score))
+
+            # TREND
+            if (price > ind['ema20'] >
+                    ind['ema50'] > ind['ema200']):
+                trend = '🟢 STRONG UPTREND'
+            elif price > ind['ema50'] > ind['ema200']:
+                trend = '🟢 UPTREND'
+            elif price > ind['ema200']:
+                trend = '🟡 ABOVE 200 EMA'
+            else:
+                trend = '🔴 DOWNTREND'
+
+            # RSI NOTE
+            if rsi > 75:
+                rsi_note = 'Overbought ⚠️'
+            elif rsi > 60:
+                rsi_note = 'Bullish'
+            elif rsi < 35:
+                rsi_note = 'Oversold 👀'
+            elif rsi < 45:
+                rsi_note = 'Bearish'
+            else:
+                rsi_note = 'Neutral'
+
+            # SHORT TERM VERDICT
             if st_score >= 70:
-                st_verdict = '🟢 SWING'
+                st_verdict = '🟢 BUY NOW'
             elif st_score >= 50:
                 st_verdict = '🟡 WAIT'
             elif st_score >= 30:
@@ -292,66 +373,77 @@ def analyze_multiple(tickers: list) -> str:
             else:
                 st_verdict = '🔴 AVOID'
 
-            # Long term score
-            above_200 = price > ind['ema200']
-            ema_aligned = (
-                ind['ema20'] > ind['ema50'] >
-                ind['ema200']
-            )
-            lt_score = 0
-            if above_200: lt_score += 35
-            if ema_aligned: lt_score += 25
-            if ind.get('roc20', 0) > 0: lt_score += 25
-            if 30 <= rsi <= 70: lt_score += 15
-            lt_score = max(0, min(100, lt_score))
-
-            if lt_score >= 70:
-                lt_verdict = '✅ LT BUY'
-            elif lt_score >= 45:
-                lt_verdict = '⏳ LT WAIT'
+            # LONG TERM VERDICT
+            if lt_score >= 75:
+                lt_verdict = '✅ BUY/ACCUMULATE'
+            elif lt_score >= 55:
+                lt_verdict = '👀 WATCH — ADD SLOWLY'
+            elif lt_score >= 35:
+                lt_verdict = '⏳ WAIT FOR UPTREND'
             else:
-                lt_verdict = '❌ LT AVOID'
+                lt_verdict = '❌ AVOID'
 
-            t_emoji = (
-                '🟢' if st_score >= 70
-                else '🟡' if st_score >= 50
-                else '🔴'
+            # OVERALL VERDICT
+            combined = (st_score + lt_score) / 2
+            if combined >= 65:
+                overall = '💪 WORTH BUYING'
+            elif combined >= 45:
+                overall = '👀 WATCHLIST ONLY'
+            else:
+                overall = '❌ NOT WORTH IT NOW'
+
+            entry = round(price, 2)
+            stop = round(price * 0.97, 2)
+            target1 = round(price * 1.08, 2)
+
+            result = (
+                f"{'='*35}\n"
+                f"📊 {ticker}\n"
+                f"{'='*35}\n"
+                f"Price:  ${price:.2f}\n"
+                f"Trend:  {trend}\n"
+                f"RSI:    {rsi:.0f} — {rsi_note}\n"
+                f"RS SPY: {rs:+.1f}%\n"
+                f"52W High: ${high_52:.2f} "
+                f"({from_high:.1f}%)\n"
+                f"1Y Return: {yr_return:+.1f}%\n"
+                f"2Y Return: {two_yr_return:+.1f}%\n"
+                f"\n"
+                f"📅 SHORT TERM\n"
+                f"Score:  {st_score}/100\n"
+                f"Signal: {st_verdict}\n"
+                f"Entry:  ${entry:.2f}\n"
+                f"Stop:   ${stop:.2f}\n"
+                f"Target: ${target1:.2f} (+8%)\n"
+                f"\n"
+                f"📈 LONG TERM\n"
+                f"Score:    {lt_score}/100\n"
+                f"Signal:   {lt_verdict}\n"
+                f"vs EMA200: {pct_vs_200:+.1f}%\n"
+                f"\n"
+                f"⭐ VERDICT\n"
+                f"{overall}\n"
             )
 
-            results.append({
-                'ticker': ticker,
-                'price': price,
-                'rsi': rsi,
-                'rs': rs,
-                'st_score': st_score,
-                'st_verdict': st_verdict,
-                'lt_score': lt_score,
-                'lt_verdict': lt_verdict,
-                't_emoji': t_emoji,
-            })
+            all_results.append(result)
 
-        except Exception:
-            continue
+        except Exception as e:
+            all_results.append(
+                f"⚠️ {ticker}: Error — "
+                f"{str(e)[:50]}\n"
+            )
 
-    if not results:
-        return "Could not analyze any tickers."
+    for result in all_results:
+        send(result)
 
-    msg = f"📊 ANALYSIS ({len(results)} stocks)\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
+    summary = (
+        f"{'='*35}\n"
+        f"📋 SUMMARY\n"
+        f"{'='*35}\n"
+        f"Analyzed: {len(all_results)} stocks\n\n"
+    )
 
-    for r in results:
-        msg += (
-            f"{r['t_emoji']} {r['ticker']} "
-            f"${r['price']:.2f}\n"
-            f"  Short: {r['st_score']}/100 "
-            f"{r['st_verdict']}\n"
-            f"  Long:  {r['lt_score']}/100 "
-            f"{r['lt_verdict']}\n"
-            f"  RSI: {r['rsi']:.0f} | "
-            f"RS: {r['rs']:+.1f}%\n\n"
-        )
-
-    return msg
+    return summary
 
 
 def handle_command(text: str) -> str:
