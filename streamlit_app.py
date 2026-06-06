@@ -439,357 +439,222 @@ if page == '⚡ Today':
 # PAGE 2 — PORTFOLIO
 # ════════════════════════════════════════
 elif page == '📊 Portfolio':
-    st.title('📊 Portfolio')
+    st.title('📊 My Portfolio')
+    st.caption('Real-time tracking of your holdings')
 
-    tab1, tab2, tab3 = st.tabs([
-        '📈 Active Trades',
-        '🏦 ETF Holdings',
-        '📋 Watchlist',
-    ])
+    db = Database()
+    db.seed_holdings()
+    holdings = db.get_my_holdings()
 
-    # ── TAB 1: ACTIVE TRADES ─────────────
-    with tab1:
-        positions = tracker.get_open_positions()
-        budget = float(os.getenv('SWING_BUDGET', '300'))
-        total_cost = sum(
-            p.get('shares', 0) * p.get('entry_price', 0)
-            for p in positions
+    if not holdings:
+        st.info('No holdings yet. Add your stocks below.')
+    else:
+        from backend.market_data.fetcher import (
+            get_current_price
         )
-        available = max(budget - total_cost, 0)
 
+        total_invested = 0.0
+        total_value = 0.0
+        rows = []
+
+        for h in holdings:
+            ticker = h['ticker']
+            shares = h.get('shares', 0)
+            avg_cost = h.get('avg_cost', 0)
+
+            try:
+                current = get_current_price(ticker)
+            except Exception:
+                current = avg_cost
+            if current == 0:
+                current = avg_cost
+
+            cost_basis = shares * avg_cost
+            market_value = shares * current
+            pnl = market_value - cost_basis
+            pnl_pct = (
+                pnl / cost_basis * 100
+            ) if cost_basis > 0 else 0
+
+            total_invested += cost_basis
+            total_value += market_value
+
+            rows.append({
+                'ticker': ticker,
+                'shares': shares,
+                'avg_cost': avg_cost,
+                'current': current,
+                'cost_basis': cost_basis,
+                'market_value': market_value,
+                'pnl': pnl,
+                'pnl_pct': pnl_pct,
+            })
+
+        total_pnl = total_value - total_invested
+        total_pnl_pct = (
+            total_pnl / total_invested * 100
+        ) if total_invested > 0 else 0
+
+        # Summary cards
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(
-                'Positions', f"{len(positions)} / 3"
+                'Total Value',
+                f"${total_value:,.2f}",
+                delta=f"${total_pnl:+.2f}",
             )
         with col2:
-            st.metric('Deployed', f"${total_cost:.2f}")
-        with col3:
-            st.metric('Available', f"${available:.2f}")
-
-        st.divider()
-
-        if not positions:
-            st.info(
-                "No open positions. "
-                "Approve a setup on Today screen."
-            )
-        else:
-            for pos in positions:
-                ticker = pos['ticker']
-                try:
-                    current = get_current_price(ticker)
-                except Exception:
-                    current = pos.get('entry_price', 0)
-
-                entry = pos.get('entry_price', 0)
-                shares = pos.get('shares', 0)
-                stop = pos.get('stop_price', 0)
-                target1 = pos.get('target1', 0)
-
-                pnl = (current - entry) * shares
-                pnl_pct = (
-                    (current - entry) / entry * 100
-                    if entry > 0 else 0
-                )
-
-                col1, col2, col3 = st.columns([2, 2, 1])
-                with col1:
-                    st.markdown(f"### {ticker}")
-                    st.write(
-                        f"**Entry:** ${entry:.2f}  |  "
-                        f"**Now:** ${current:.2f}"
-                    )
-                    st.write(
-                        f"**Stop:** ${stop:.2f}  |  "
-                        f"**Target:** ${target1:.2f}"
-                    )
-                    st.write(
-                        f"**Shares:** {shares:.4f}  |  "
-                        f"**Strategy:** "
-                        f"{pos.get('strategy', '')}"
-                    )
-                    st.markdown(
-                        f"[📈 TradingView]"
-                        f"({tradingview_link(ticker)})"
-                    )
-
-                with col2:
-                    st.metric(
-                        'P&L',
-                        f"${pnl:+.2f}",
-                        delta=f"{pnl_pct:+.1f}%",
-                    )
-                    if target1 > entry and entry > 0:
-                        progress = min(
-                            max(
-                                (current - entry) /
-                                (target1 - entry), 0
-                            ), 1
-                        )
-                        st.progress(progress)
-                        st.caption(
-                            f"{progress * 100:.0f}%"
-                            f" to target"
-                        )
-
-                with col3:
-                    if st.button(
-                        '🚪 Exit',
-                        key=f"exit_{ticker}",
-                        use_container_width=True,
-                    ):
-                        result = tracker.close_position(
-                            ticker, current, 'manual_exit'
-                        )
-                        if result:
-                            journal.log_trade_close(
-                                ticker, current,
-                                'manual_exit'
-                            )
-                            _send_telegram(
-                                f"🚪 EXIT: {ticker}\n"
-                                f"Price: ${current:.2f}\n"
-                                f"PnL: ${pnl:+.2f}"
-                            )
-                            st.success('Closed!')
-                            st.rerun()
-
-                st.divider()
-
-        # Add position manually
-        st.subheader('Add Position Manually')
-        st.caption('After buying on Robinhood')
-
-        with st.form('add_position'):
-            col1, col2 = st.columns(2)
-            with col1:
-                add_ticker = st.text_input(
-                    'Ticker', placeholder='e.g. NVDA'
-                ).upper()
-                add_shares = st.number_input(
-                    'Shares',
-                    min_value=0.0001,
-                    value=1.0,
-                    step=0.01,
-                    format="%.4f",
-                )
-                add_entry = st.number_input(
-                    'Entry Price',
-                    min_value=0.01,
-                    value=100.0,
-                )
-            with col2:
-                add_stop = st.number_input(
-                    'Stop Loss',
-                    min_value=0.01,
-                    value=97.0,
-                )
-                add_target = st.number_input(
-                    'Target 1',
-                    min_value=0.01,
-                    value=108.0,
-                )
-                add_strategy = st.selectbox(
-                    'Strategy',
-                    ['EMA_RIDE', 'BREAKOUT', 'RS_TREND'],
-                )
-
-            submitted = st.form_submit_button(
-                '➕ Add Position',
-                type='primary',
-                use_container_width=True,
-            )
-
-            if submitted and add_ticker:
-                tracker.open_position(
-                    ticker=add_ticker,
-                    shares=add_shares,
-                    entry_price=add_entry,
-                    stop_price=add_stop,
-                    target1=add_target,
-                    target2=add_target * 1.07,
-                    strategy=add_strategy,
-                )
-                journal.log_trade_open(
-                    ticker=add_ticker,
-                    strategy=add_strategy,
-                    shares=add_shares,
-                    entry_price=add_entry,
-                    stop=add_stop,
-                    target1=add_target,
-                    target2=add_target * 1.07,
-                )
-                st.success(f"Added {add_ticker}!")
-                st.rerun()
-
-    # ── TAB 2: ETF HOLDINGS ──────────────
-    with tab2:
-        st.subheader('ETF Long Term Holdings')
-        st.caption(
-            'Track your long-term ETF portfolio'
-        )
-
-        db2 = Database()
-
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            etf_ticker = st.text_input(
-                'ETF ticker', placeholder='e.g. VOO'
-            ).upper()
-        with col2:
-            etf_shares = st.number_input(
-                'Shares', min_value=0.0,
-                value=0.0, step=0.001, format="%.4f",
-                key='etf_shares_input',
-            )
-        with col3:
-            etf_cost = st.number_input(
-                'Avg cost', min_value=0.0, value=0.0,
-                key='etf_cost_input',
-            )
-        with col4:
-            st.write("")
-            st.write("")
-            if st.button(
-                '➕ Add ETF', use_container_width=True
-            ):
-                if etf_ticker:
-                    db2.add_etf_holding(
-                        etf_ticker, etf_shares, etf_cost
-                    )
-                    st.success(f"Added {etf_ticker}!")
-                    st.rerun()
-
-        st.divider()
-
-        holdings = db2.get_etf_holdings()
-        if not holdings:
-            st.info('No ETF holdings tracked yet.')
-        else:
-            total_etf_value = 0.0
-            for h in holdings:
-                ticker = h['ticker']
-                shares = h.get('shares', 0)
-                avg_cost = h.get('avg_cost', 0)
-                try:
-                    current = get_current_price(ticker)
-                except Exception:
-                    current = avg_cost
-
-                value = shares * current
-                cost_basis = shares * avg_cost
-                pnl = value - cost_basis
-                pnl_pct = (
-                    pnl / cost_basis * 100
-                ) if cost_basis > 0 else 0
-                total_etf_value += value
-
-                col1, col2, col3, col4 = (
-                    st.columns([2, 2, 2, 1])
-                )
-                with col1:
-                    st.write(f"**{ticker}**")
-                    st.caption(f"{shares:.4f} shares")
-                with col2:
-                    st.write(f"Now: ${current:.2f}")
-                    st.caption(f"Avg: ${avg_cost:.2f}")
-                with col3:
-                    st.write(f"${value:.2f} total")
-                    st.caption(
-                        f"PnL: ${pnl:+.2f} "
-                        f"({pnl_pct:+.1f}%)"
-                    )
-                with col4:
-                    if st.button(
-                        '🗑️',
-                        key=f"del_etf_{ticker}",
-                        use_container_width=True,
-                    ):
-                        db2.remove_etf_holding(ticker)
-                        st.rerun()
-
-                st.divider()
-
             st.metric(
-                'Total ETF Value',
-                f"${total_etf_value:,.2f}"
-            )
-
-    # ── TAB 3: WATCHLIST ─────────────────
-    with tab3:
-        st.subheader('Swing Stock Watchlist')
-        st.caption(
-            'These stocks are scanned daily '
-            'for opportunities'
-        )
-
-        db3 = Database()
-
-        col1, col2, col3 = st.columns([2, 2, 1])
-        with col1:
-            new_ticker = st.text_input(
-                'Add ticker', placeholder='e.g. AMD'
-            ).upper()
-        with col2:
-            new_sector = st.selectbox(
-                'Sector',
-                ['ai_tech', 'semiconductors',
-                 'cybersecurity', 'software',
-                 'fintech', 'space', 'biotech',
-                 'consumer_tech', 'utilities',
-                 'social_media', 'speculative',
-                 'other'],
+                'Total Invested',
+                f"${total_invested:,.2f}",
             )
         with col3:
-            st.write("")
-            st.write("")
-            if st.button(
-                '➕ Add',
-                type='primary',
-                use_container_width=True,
-                key='wl_add',
-            ):
-                if new_ticker:
-                    ok = db3.add_to_watchlist(
-                        new_ticker, 'stock', new_sector
-                    )
-                    if ok:
-                        st.success(f"Added {new_ticker}!")
-                        st.rerun()
-                    else:
-                        st.error('Failed to add')
+            st.metric(
+                'Total Return',
+                f"{total_pnl_pct:+.1f}%",
+                delta=f"${total_pnl:+.2f}",
+            )
 
         st.divider()
+        st.subheader('My Stocks')
 
-        wl = db3.get_watchlist()
-        stocks = [
-            w for w in wl
-            if w['ticker_type'] == 'stock'
-        ]
-        st.write(
-            f"**{len(stocks)} stocks being scanned**"
+        rows.sort(
+            key=lambda x: x['pnl_pct'], reverse=True
         )
 
-        for stock in stocks:
-            col1, col2, col3 = st.columns([2, 3, 1])
+        for row in rows:
+            col1, col2, col3, col4 = st.columns(
+                [2, 2, 2, 1]
+            )
+
             with col1:
-                st.write(f"**{stock['ticker']}**")
-            with col2:
-                st.write(
-                    f"{stock['sector']} · "
-                    f"added {stock['added_at'][:10]}"
+                st.markdown(f"### {row['ticker']}")
+                st.caption(
+                    f"{row['shares']:.4f} shares"
                 )
+                st.markdown(
+                    f"[📈 Chart](https://www.tradingview.com"
+                    f"/chart/?symbol={row['ticker']})"
+                )
+
+            with col2:
+                st.metric(
+                    'Avg Cost',
+                    f"${row['avg_cost']:.2f}",
+                )
+                st.metric(
+                    'Now',
+                    f"${row['current']:.2f}",
+                )
+
             with col3:
+                st.metric(
+                    'Value',
+                    f"${row['market_value']:.2f}",
+                    delta=f"{row['pnl_pct']:+.1f}%",
+                )
+                pnl_emoji = (
+                    '📈' if row['pnl'] >= 0 else '📉'
+                )
+                st.write(
+                    f"{pnl_emoji} "
+                    f"${row['pnl']:+.2f}"
+                )
+
+            with col4:
                 if st.button(
-                    '🗑️',
-                    key=f"del_wl_{stock['ticker']}",
+                    '✏️',
+                    key=f"edit_{row['ticker']}",
                     use_container_width=True,
                 ):
-                    db3.remove_from_watchlist(
-                        stock['ticker']
-                    )
+                    st.session_state[
+                        f"editing_{row['ticker']}"
+                    ] = True
+
+                if st.button(
+                    '🗑️',
+                    key=f"del_{row['ticker']}",
+                    use_container_width=True,
+                ):
+                    db.remove_holding(row['ticker'])
                     st.rerun()
+
+            if st.session_state.get(
+                f"editing_{row['ticker']}"
+            ):
+                with st.form(
+                    f"edit_form_{row['ticker']}"
+                ):
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        new_shares = st.number_input(
+                            'Shares',
+                            value=float(row['shares']),
+                            format="%.6f",
+                        )
+                    with ec2:
+                        new_cost = st.number_input(
+                            'Avg Cost',
+                            value=float(row['avg_cost']),
+                            format="%.2f",
+                        )
+                    if st.form_submit_button(
+                        'Save', type='primary'
+                    ):
+                        db.update_holding(
+                            row['ticker'],
+                            new_shares,
+                            new_cost,
+                        )
+                        st.session_state[
+                            f"editing_{row['ticker']}"
+                        ] = False
+                        st.rerun()
+
+            st.divider()
+
+    # Add new holding
+    st.subheader('Add Stock')
+    with st.form('add_holding'):
+        ac1, ac2, ac3 = st.columns(3)
+        with ac1:
+            new_ticker = st.text_input(
+                'Ticker', placeholder='NVDA'
+            ).upper()
+        with ac2:
+            new_shares = st.number_input(
+                'Shares',
+                min_value=0.000001,
+                value=1.0,
+                format="%.6f",
+            )
+        with ac3:
+            new_cost = st.number_input(
+                'Avg Cost ($)',
+                min_value=0.0,
+                value=100.0,
+                format="%.2f",
+            )
+
+        if st.form_submit_button(
+            '➕ Add to Portfolio',
+            type='primary',
+            use_container_width=True,
+        ):
+            if new_ticker:
+                db.add_holding(
+                    new_ticker, new_shares, new_cost
+                )
+                st.success(f"Added {new_ticker}!")
+                st.rerun()
+
+    import time as _time
+    st.caption(
+        f"Last updated: "
+        f"{_time.strftime('%H:%M:%S')}"
+    )
+    if st.button('🔄 Refresh Prices'):
+        st.rerun()
 
 # ════════════════════════════════════════
 # PAGE 3 — STATS
