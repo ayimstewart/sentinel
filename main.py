@@ -71,40 +71,47 @@ def _send_telegram(message: str):
 def _send_signals_telegram(signals: list):
     if not signals:
         return
-    for sig in signals[:3]:
-        hold = sig.get('hold_plan', {})
-        emoji = '🟢' if sig.get('action') == 'READY' else '🟡'
-        msg = (
-            f"⚡ SWING SIGNAL\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"{emoji} {sig['ticker']} — {sig.get('action')}\n"
-            f"Strategy: {sig.get('strategy')}\n"
-            f"Score: {sig.get('score')}/100\n\n"
-            f"TRADE PLAN\n"
-            f"Entry:    ${sig.get('entry', 0):.2f}\n"
-            f"Stop:     ${sig.get('stop', 0):.2f} "
-            f"(-{hold.get('risk_pct', 3)}%)\n"
-            f"Target 1: ${sig.get('target1', 0):.2f} "
-            f"(+{hold.get('reward_pct', 8)}%)\n"
-            f"Target 2: ${sig.get('target2', 0):.2f}\n\n"
-            f"HOLD PLAN\n"
-            f"Duration: "
-            f"{hold.get('hold_estimate', '3-7 days')}\n"
-            f"R/R Ratio: "
-            f"1:{hold.get('rr_ratio', 2.5)}\n\n"
-            f"EXIT RULES\n"
-        )
-        for rule in hold.get('exit_rules', []):
-            msg += f"• {rule}\n"
-        msg += (
-            f"\n📱 ROBINHOOD STEPS:\n"
-            f"1. Open Robinhood\n"
-            f"2. Search {sig['ticker']}\n"
-            f"3. Buy ${sig.get('cost', 0):.2f} worth\n"
-            f"4. Set stop at ${sig.get('stop', 0):.2f}\n\n"
-            f"Check dashboard to approve:"
-            f"\nhttp://localhost:8501"
-        )
+    for sig in signals:
+        state = sig.get('state', sig.get('action', 'WATCH'))
+        ticker = sig['ticker']
+
+        if state == 'BUY_ZONE':
+            msg = (
+                f"🟢 {ticker}\n"
+                f"Buy at ${sig.get('entry', 0):.2f}\n"
+                f"Stop at ${sig.get('stop', 0):.2f}\n"
+                f"Sell at ${sig.get('target1', 0):.2f}\n"
+                f"Hold {sig.get('hold_days', 12)} days"
+            )
+
+        elif state == 'WATCH':
+            zone = sig.get('entry_zone_high', 0)
+            current = sig.get('price', sig.get('entry', 0))
+            drop_needed = round(current - zone, 2)
+            drop_pct = round(
+                (zone - current) / current * 100, 1
+            ) if current > 0 else 0
+            msg = (
+                f"👀 {ticker}\n"
+                f"Watch below ${zone:.2f}\n"
+                f"Buy at ${zone:.2f}\n"
+                f"Sell at ${sig.get('target1', 0):.2f}\n"
+                f"Hold {sig.get('hold_days', 12)} days\n"
+                f"Needs to drop: "
+                f"${drop_needed:.2f} ({drop_pct:.1f}%)"
+            )
+
+        elif state == 'TOO_HIGH':
+            zone = sig.get('entry_zone_high', 0)
+            msg = (
+                f"⏳ {ticker}\n"
+                f"Good stock — too high now\n"
+                f"Wait for ${zone:.2f}"
+            )
+
+        else:
+            continue
+
         _send_telegram(msg)
 
 
@@ -152,17 +159,30 @@ def send_morning_brief():
         )
 
         if signals:
-            ready = [s for s in signals if s.get('action') == 'READY']
-            watch = [s for s in signals if s.get('action') == 'WATCH']
+            buys = [
+                s for s in signals
+                if s.get('action') == 'BUY_ZONE'
+            ]
+            watch = [
+                s for s in signals
+                if s.get('action') == 'WATCH'
+            ]
 
-            if ready:
-                msg += f"🟢 READY ({len(ready)}):\n"
-                for s in ready[:3]:
-                    msg += f"  {s['ticker']} score={s['score']}\n"
+            if buys:
+                msg += f"🟢 BUY ZONE ({len(buys)}):\n"
+                for s in buys[:3]:
+                    msg += (
+                        f"  {s['ticker']} "
+                        f"entry=${s.get('entry', 0):.2f}\n"
+                    )
             if watch:
-                msg += f"🟡 WATCH ({len(watch)}):\n"
+                msg += f"👀 WATCH ({len(watch)}):\n"
                 for s in watch[:3]:
-                    msg += f"  {s['ticker']} score={s['score']}\n"
+                    msg += (
+                        f"  {s['ticker']} "
+                        f"wait for "
+                        f"${s.get('entry_zone_high', 0):.2f}\n"
+                    )
             msg += "\nOpen dashboard to approve"
         else:
             msg += (
@@ -170,19 +190,23 @@ def send_morning_brief():
                 "Waiting for better conditions"
             )
 
-        # Check Robinhood stocks for setups
+        # Check personal stocks for setups
         rh_setups = []
         for ticker in MY_ROBINHOOD_STOCKS:
             try:
                 data = fetch(ticker, '1y')
                 if data and spy_data:
-                    signal = scan(ticker, data.df, spy_data.df)
-                    if signal and signal.action in ('READY', 'WATCH'):
+                    signal = scan(
+                        ticker, data.df, spy_data.df
+                    )
+                    if signal and signal.action in (
+                        'BUY_ZONE', 'WATCH'
+                    ):
                         rh_setups.append({
                             'ticker': ticker,
                             'action': signal.action,
                             'score': signal.score,
-                            'strategy': signal.strategy,
+                            'entry': signal.entry,
                         })
             except Exception:
                 pass
@@ -190,11 +214,14 @@ def send_morning_brief():
         if rh_setups:
             msg += f"\n📱 YOUR STOCKS:\n"
             for s in rh_setups:
-                emoji = '🟢' if s['action'] == 'READY' else '🟡'
+                emoji = (
+                    '🟢' if s['action'] == 'BUY_ZONE'
+                    else '👀'
+                )
                 msg += (
                     f"{emoji} {s['ticker']} "
                     f"— {s['action']} "
-                    f"({s['score']}/100)\n"
+                    f"entry=${s.get('entry', 0):.2f}\n"
                 )
 
         msg += "\n\nDashboard: http://localhost:8501"
@@ -342,6 +369,22 @@ def run_scan():
         scan_tickers = all_tickers
         new_trades_allowed = True
 
+    # Capital lock: skip scanning if fully deployed
+    capital = get_capital_status()
+    if capital['capital_full']:
+        logger.info(
+            "Capital fully deployed — "
+            "monitoring existing positions only"
+        )
+        _send_telegram(
+            "💰 Capital full\n"
+            "Monitoring active trades only\n"
+            "No new signals until capital frees up"
+        )
+        check_exit_alerts()
+        daily_position_update()
+        return
+
     logger.info(
         f"Scanning {len(scan_tickers)} stocks "
         f"(budget: ${available:.0f} available, "
@@ -356,7 +399,6 @@ def run_scan():
     from backend.strategies.scanner import (
         scan as _scan,
         calculate_indicators,
-        calculate_hold_plan,
     )
     from backend.risk.engine import evaluate, Portfolio
 
@@ -392,7 +434,7 @@ def run_scan():
                 elif current_price >= target1 * 0.98:
                     rec, urgency = 'SELL_HALF', 'HIGH'
                 elif (signal and
-                      signal.action == 'READY'):
+                      signal.action == 'BUY_ZONE'):
                     rec, urgency = 'HOLD_STRONG', 'LOW'
                 elif ind and ind['close'] > ind['ema21']:
                     rec, urgency = 'HOLD', 'LOW'
@@ -435,19 +477,6 @@ def run_scan():
                 )
                 continue
 
-            hold_plan = calculate_hold_plan(
-                ticker=ticker,
-                entry=signal.entry,
-                stop=signal.stop,
-                target1=signal.target1,
-                target2=signal.target2,
-                atr_pct=(
-                    ind.get('atr_pct', 2.0)
-                    if ind else 2.0
-                ),
-                strategy=signal.strategy,
-            )
-
             try:
                 explanation = explain_setup(
                     ticker, signal.strategy,
@@ -476,15 +505,21 @@ def run_scan():
                 'ticker': ticker,
                 'strategy': signal.strategy,
                 'action': signal.action,
+                'state': signal.state,
                 'score': signal.score,
                 'entry': signal.entry,
                 'stop': signal.stop,
                 'target1': signal.target1,
                 'target2': signal.target2,
+                'entry_zone_low': signal.entry_zone_low,
+                'entry_zone_high': signal.entry_zone_high,
+                'rr_ratio': signal.rr_ratio,
+                'hold_days': signal.hold_days,
+                'price': ind['close'] if ind else signal.entry,
                 'shares': risk.shares,
                 'cost': risk.position_value,
                 'explanation': explanation,
-                'hold_plan': hold_plan,
+                'hold_plan': {},
             })
 
             logger.info(
@@ -641,42 +676,136 @@ def daily_position_update():
                 if entry > 0 else 0
             )
 
-            progress = (
-                (current - entry) /
-                (target1 - entry) * 100
-            ) if target1 > entry else 0
-            progress = max(0, min(100, progress))
-
-            action = "HOLD ✅"
             if current <= stop * 1.02:
-                action = "⚠️ NEAR STOP — CONSIDER SELLING"
+                action = "SELL ALL NOW"
+                emoji = "🛑"
             elif current >= target1 * 0.99:
-                action = "🎯 TARGET HIT — SELL HALF"
-            elif pnl_pct < -2:
-                action = "⚠️ WEAKENING — WATCH CLOSELY"
+                action = "SELL HALF NOW"
+                emoji = "🎯"
+            else:
+                action = "HOLD"
+                emoji = "✅"
 
-            msg = (
-                f"📊 DAILY UPDATE — {ticker}\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"Entry:   ${entry:.2f}\n"
-                f"Current: ${current:.2f}\n"
-                f"PnL:     {pnl_pct:+.1f}%\n\n"
-                f"Stop:    ${stop:.2f}\n"
-                f"Target:  ${target1:.2f}\n"
-                f"Progress: {progress:.0f}% to target\n\n"
-                f"ACTION: {action}\n\n"
-                f"Morning check:\n"
-                f"• Below ${stop:.2f} → SELL ALL\n"
-                f"• Above ${target1:.2f} → SELL HALF\n"
-                f"• Between → HOLD"
+            _send_telegram(
+                f"{emoji} {ticker}\n"
+                f"Now ${current:.2f} "
+                f"({pnl_pct:+.1f}%)\n"
+                f"Target ${target1:.2f}\n"
+                f"{action}"
             )
-
-            _send_telegram(msg)
 
         except Exception as e:
             logger.error(
                 f"Daily update {ticker}: {e}"
             )
+
+
+# ── CAPITAL STATUS ───────────────────────────────────────
+
+def get_capital_status() -> dict:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.expanduser('~/sentinel/.env'))
+
+    budget = float(os.getenv('SWING_BUDGET', '800'))
+    positions = tracker.get_open_positions()
+    deployed = sum(
+        p.get('shares', 0) *
+        p.get('entry_price', 0)
+        for p in positions
+    )
+    available = max(budget - deployed, 0)
+    pct_used = (
+        deployed / budget * 100
+    ) if budget > 0 else 0
+
+    return {
+        'budget': budget,
+        'deployed': deployed,
+        'available': available,
+        'pct_used': pct_used,
+        'positions': len(positions),
+        'capital_full': pct_used >= 90,
+    }
+
+
+# ── ETF MONTH HOLD ────────────────────────────────────────
+
+ETF_HOLD_RULES = {
+    'QQQ': {
+        'buy_condition': 'rsi_below_40',
+        'hold_days': 30,
+        'target_pct': 5.0,
+        'stop_pct': 3.0,
+    },
+    'SPY': {
+        'buy_condition': 'rsi_below_40',
+        'hold_days': 30,
+        'target_pct': 4.0,
+        'stop_pct': 3.0,
+    },
+    'VOO': {
+        'buy_condition': 'down_3pct_week',
+        'hold_days': 30,
+        'target_pct': 4.0,
+        'stop_pct': 3.0,
+    },
+}
+
+
+def check_etf_opportunities():
+    from backend.strategies.scanner import calculate_indicators
+
+    for etf, rules in ETF_HOLD_RULES.items():
+        try:
+            data = fetch(etf, '3mo')
+            if not data:
+                continue
+
+            ind = calculate_indicators(data.df)
+            if not ind:
+                continue
+
+            triggered = False
+            reason = ''
+
+            if rules['buy_condition'] == 'rsi_below_40':
+                if ind['rsi'] < 40:
+                    triggered = True
+                    reason = (
+                        f"RSI {ind['rsi']:.0f} "
+                        f"— oversold"
+                    )
+
+            elif rules['buy_condition'] == 'down_3pct_week':
+                weekly_change = ind.get('roc5', 0)
+                if weekly_change < -3:
+                    triggered = True
+                    reason = (
+                        f"Down {weekly_change:.1f}% "
+                        f"this week"
+                    )
+
+            if triggered:
+                price = ind['close']
+                target = round(
+                    price *
+                    (1 + rules['target_pct'] / 100), 2
+                )
+                stop = round(
+                    price *
+                    (1 - rules['stop_pct'] / 100), 2
+                )
+                _send_telegram(
+                    f"📊 {etf} ETF\n"
+                    f"Buy at ${price:.2f}\n"
+                    f"Stop at ${stop:.2f}\n"
+                    f"Sell at ${target:.2f}\n"
+                    f"Hold {rules['hold_days']} days\n"
+                    f"Reason: {reason}"
+                )
+
+        except Exception as e:
+            logger.error(f"ETF check {etf}: {e}")
 
 
 # ── WEEKLY DISCOVERY ──────────────────────────────────────
@@ -762,6 +891,9 @@ def run_bot():
     schedule.every(30).minutes.do(check_exit_alerts)
     schedule.every().day.at("10:00").do(
         daily_position_update
+    )
+    schedule.every().day.at("10:30").do(
+        check_etf_opportunities
     )
     schedule.every().sunday.at("17:00").do(
         run_weekly_discovery

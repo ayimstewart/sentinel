@@ -120,135 +120,56 @@ if page == '⚡ Today':
     try:
         import yfinance as yf
         spy_hist = yf.Ticker('SPY').history(period='2d')
-        qqq_hist = yf.Ticker('QQQ').history(period='2d')
-        vix_hist = yf.Ticker('^VIX').history(period='2d')
-
         spy_chg = round(
             (spy_hist['Close'].iloc[-1] -
              spy_hist['Close'].iloc[-2]) /
             spy_hist['Close'].iloc[-2] * 100, 2
         ) if len(spy_hist) >= 2 else 0
-
-        qqq_chg = round(
-            (qqq_hist['Close'].iloc[-1] -
-             qqq_hist['Close'].iloc[-2]) /
-            qqq_hist['Close'].iloc[-2] * 100, 2
-        ) if len(qqq_hist) >= 2 else 0
-
-        vix_val = round(
-            float(vix_hist['Close'].iloc[-1]), 1
-        ) if len(vix_hist) >= 1 else 0
-
     except Exception:
-        spy_chg = qqq_chg = vix_val = 0
+        spy_chg = 0
 
-    col1, col2, col3, col4 = st.columns(4)
+    try:
+        from main import get_capital_status
+        capital = get_capital_status()
+    except Exception:
+        capital = {
+            'available': 0,
+            'positions': 0,
+            'capital_full': False,
+        }
+
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric('SPY', f"{spy_chg:+.1f}%",
-                  delta=f"{spy_chg:+.1f}%")
+        st.metric('SPY', f"{spy_chg:+.1f}%")
     with col2:
-        st.metric('QQQ', f"{qqq_chg:+.1f}%",
-                  delta=f"{qqq_chg:+.1f}%")
+        st.metric(
+            'Available',
+            f"${capital['available']:.0f}"
+        )
     with col3:
-        st.metric('VIX', f"{vix_val}")
-    with col4:
-        market = '🟢 BULLISH' if spy_chg > 0 else '🔴 BEARISH'
-        st.metric('Market', market)
+        st.metric(
+            'Positions',
+            f"{capital['positions']}/3"
+        )
 
     st.divider()
 
-    # Scan button
-    db = Database()
-    watchlist = db.get_watchlist()
-    tickers = [w['ticker'] for w in watchlist]
-
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        scan_now = st.button(
-            '🔍 Scan Now',
-            type='primary',
-            use_container_width=True,
-        )
-    with col2:
-        signals_today = journal.get_todays_signals()
-        st.caption(
-            f"Watching {len(tickers)} stocks · "
-            f"{len(signals_today)} signals today"
+    if capital.get('capital_full'):
+        st.warning(
+            "💰 Capital fully deployed — "
+            "no new trades until exits free up cash"
         )
 
-    if scan_now:
-        with st.spinner(
-            f'Scanning {len(tickers)} stocks...'
-        ):
+    if st.button(
+        '🔍 Scan Now',
+        type='primary',
+        use_container_width=True,
+    ):
+        with st.spinner('Scanning...'):
             try:
-                spy_data = fetch('SPY', '1y')
-                open_positions = (
-                    tracker.get_open_positions()
-                )
-                budget = float(
-                    os.getenv('SWING_BUDGET', '300')
-                )
-
-                new_signals = []
-                for ticker in tickers:
-                    data = fetch(ticker, '1y')
-                    if not data or not spy_data:
-                        continue
-
-                    signal = scan(
-                        ticker, data.df, spy_data.df
-                    )
-                    if not signal:
-                        continue
-
-                    portfolio = Portfolio(
-                        positions=open_positions,
-                        portfolio_value=budget,
-                        cash=budget,
-                        daily_pnl=0.0,
-                    )
-                    risk = evaluate(signal, portfolio)
-
-                    sig_id = journal.log_signal(
-                        ticker=ticker,
-                        strategy=signal.strategy,
-                        action=signal.action,
-                        score=signal.score,
-                        confidence=signal.confidence,
-                        entry=signal.entry,
-                        stop=signal.stop,
-                        target1=signal.target1,
-                        target2=signal.target2,
-                        reason=signal.reason,
-                    )
-
-                    new_signals.append({
-                        'id': sig_id,
-                        'ticker': ticker,
-                        'strategy': signal.strategy,
-                        'action': signal.action,
-                        'score': signal.score,
-                        'entry': signal.entry,
-                        'stop': signal.stop,
-                        'target1': signal.target1,
-                        'target2': signal.target2,
-                        'shares': risk.shares,
-                        'cost': risk.position_value,
-                        'reason': signal.reason,
-                        'hold_plan': signal.hold_plan,
-                    })
-
-                if new_signals:
-                    st.success(
-                        f"Found {len(new_signals)} setups!"
-                    )
-                else:
-                    st.info(
-                        "No setups found. "
-                        "Conditions not met today."
-                    )
+                from main import run_scan
+                run_scan()
                 st.rerun()
-
             except Exception as e:
                 st.error(f"Scan error: {e}")
 
@@ -260,77 +181,79 @@ if page == '⚡ Today':
     ]
 
     if not pending:
-        st.info(
-            "No setups right now. "
-            "Click Scan Now to check."
-        )
+        st.info("No signals yet. Click Scan Now.")
     else:
         st.subheader(f"Today's Setups ({len(pending)})")
 
         for sig in pending:
-            action = sig.get('action', 'WATCH')
-            color = (
-                '🟢' if action == 'READY'
-                else '🟡' if action == 'WATCH'
-                else '🔴'
+            state = sig.get('action', 'WATCH')
+            ticker = sig.get('ticker', '')
+
+            emoji = (
+                '🟢' if state == 'BUY_ZONE'
+                else '🟡' if state == 'WATCH'
+                else '⏳'
             )
 
             with st.container():
-                col1, col2, col3 = st.columns([3, 2, 1])
+                col1, col2 = st.columns([3, 1])
 
                 with col1:
                     st.markdown(
-                        f"### {color} {sig['ticker']} "
-                        f"— {action}"
+                        f"### {emoji} {ticker}"
                     )
-                    st.write(
-                        f"Strategy: {sig.get('strategy')}"
+                    entry = sig.get('entry', 0)
+                    stop = sig.get('stop', 0)
+                    t1 = sig.get('target1', 0)
+                    hold = sig.get('hold_days', 12)
+                    zone = sig.get(
+                        'entry_zone_high', entry
                     )
-                    score = sig.get('score', 0)
-                    st.progress(score / 100)
-                    st.caption(f"Score: {score}/100")
+
+                    if state == 'BUY_ZONE':
+                        st.write(
+                            f"Buy at ${entry:.2f} · "
+                            f"Stop ${stop:.2f} · "
+                            f"Sell ${t1:.2f} · "
+                            f"Hold {hold} days"
+                        )
+                    elif state == 'WATCH':
+                        st.write(
+                            f"Watch below ${zone:.2f} · "
+                            f"Target ${t1:.2f} · "
+                            f"Hold {hold} days"
+                        )
+                    else:
+                        st.write(
+                            f"Too extended — "
+                            f"wait for ${zone:.2f}"
+                        )
+
+                    st.caption(sig.get('reason', ''))
                     st.markdown(
                         f"[📈 TradingView]"
-                        f"({tradingview_link(sig['ticker'])})"
+                        f"({tradingview_link(ticker)})"
                     )
 
                 with col2:
-                    st.write(
-                        f"**Entry:** "
-                        f"${sig.get('entry', 0):.2f}"
-                    )
-                    st.write(
-                        f"**Stop:** "
-                        f"${sig.get('stop', 0):.2f}"
-                    )
-                    st.write(
-                        f"**Target:** "
-                        f"${sig.get('target1', 0):.2f}"
-                    )
-                    st.caption(sig.get('reason', ''))
-
-                with col3:
                     sig_id = sig.get('id')
-
-                    if st.button(
-                        '✅ Approve',
-                        key=f"app_{sig_id}",
-                        type='primary',
-                        use_container_width=True,
-                    ):
-                        try:
-                            from main import (
-                                execute_approved_trade
-                            )
-                            execute_approved_trade(sig)
-                        except Exception:
-                            pass
-                        journal.approve_signal(sig_id)
-                        st.success(
-                            '✅ Trade placed!\n'
-                            '📱 Check Telegram'
-                        )
-                        st.rerun()
+                    if state == 'BUY_ZONE':
+                        if st.button(
+                            '✅ Buy',
+                            key=f"app_{sig_id}",
+                            type='primary',
+                            use_container_width=True,
+                        ):
+                            try:
+                                from main import (
+                                    execute_approved_trade
+                                )
+                                execute_approved_trade(sig)
+                            except Exception:
+                                pass
+                            journal.approve_signal(sig_id)
+                            st.success('✅ Trade placed!')
+                            st.rerun()
 
                     if st.button(
                         '⏭ Skip',
@@ -359,14 +282,16 @@ if page == '⚡ Today':
                         for i, rank in enumerate(top3):
                             col1, col2 = st.columns([3, 2])
                             with col1:
-                                emoji = (
+                                r_emoji = (
                                     '🟢'
-                                    if rank.action == 'READY'
+                                    if rank.action in (
+                                        'READY', 'BUY_ZONE'
+                                    )
                                     else '🟡'
                                 )
                                 st.markdown(
-                                    f"### {i+1}. {emoji} "
-                                    f"{rank.ticker}"
+                                    f"### {i+1}. "
+                                    f"{r_emoji} {rank.ticker}"
                                 )
                                 st.progress(
                                     rank.composite_score / 100
@@ -411,8 +336,9 @@ if page == '⚡ Today':
 
     # Discover
     st.divider()
-    with st.expander('🔍 Discover Opportunities',
-                     expanded=False):
+    with st.expander(
+        '🔍 Discover Opportunities', expanded=False
+    ):
         col1, col2 = st.columns(2)
         with col1:
             min_score = st.slider(
@@ -460,13 +386,15 @@ if page == '⚡ Today':
                                 st.columns([2, 2, 1])
                             )
                             with col1:
-                                emoji = (
+                                d_emoji = (
                                     '🟢'
-                                    if d.action == 'READY'
+                                    if d.action in (
+                                        'READY', 'BUY_ZONE'
+                                    )
                                     else '🟡'
                                 )
                                 st.markdown(
-                                    f"**{emoji} {d.ticker}**"
+                                    f"**{d_emoji} {d.ticker}**"
                                 )
                                 st.progress(d.score / 100)
                                 st.caption(

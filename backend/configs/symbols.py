@@ -48,17 +48,33 @@ SWING_TICKERS = [
     for ticker in tickers
 ]
 
-# Your personal Robinhood holdings
-# Bot tracks these and looks for swing setups
-MY_ROBINHOOD_STOCKS = [
-    'NVDA',   # AI chips
-    'AAPL',   # Core tech
-    'GRAB',   # Southeast Asia fintech
-    'AGIX',   # AI
-    'XEL',    # Utilities
-    'NBIS',   # Speculative
-    'PENG',   # Speculative
+# Highest quality stocks — scan universe
+CORE_WATCHLIST = [
+    'NVDA',  # AI leader
+    'AAPL',  # Core tech
+    'MSFT',  # AI + cloud
+    'META',  # Social + AI
+    'CRWD',  # Cyber leader
+    'ASML',  # Semi equipment
+    'NOW',   # Enterprise software
+    'PLTR',  # AI + data
+    'RKLB',  # Space
+    'HOOD',  # Fintech
+    'RDDT',  # Social
+    'OKLO',  # Nuclear
 ]
+
+# Your personal stocks — always scan first
+MY_STOCKS = [
+    'NVDA', 'AAPL', 'GRAB',
+    'AGIX', 'XEL', 'NBIS',
+]
+
+# Backward compat alias
+MY_ROBINHOOD_STOCKS = MY_STOCKS
+
+# Max stocks per scan for speed
+MAX_SCAN_STOCKS = 15
 
 # Sector mapping for risk engine
 SECTORS = {
@@ -112,8 +128,7 @@ def get_sector(ticker):
     return SECTORS.get(ticker, 'other')
 
 
-# Priority scan order
-# Your stocks first then swing universe
+# Priority scan order: personal stocks first, then core watchlist
 SCAN_PRIORITY = list(dict.fromkeys(
-    MY_ROBINHOOD_STOCKS + SWING_TICKERS
+    MY_STOCKS + CORE_WATCHLIST
 ))

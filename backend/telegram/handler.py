@@ -228,6 +228,45 @@ def analyze_single(ticker: str) -> str:
                 f"🧠 AI NOTE\n{ai_note}"
             )
 
+        # PULLBACK ENTRY PLAN
+        zone_low = round(ind['ema21'] * 0.98, 2)
+        zone_high = round(ind['ema21'] * 1.02, 2)
+        pct_to_zone = round(
+            (price - zone_high) / price * 100, 1
+        )
+        target_from_zone = round(zone_high * 1.12, 2)
+        stop_from_zone = round(zone_low * 0.97, 2)
+
+        if price > zone_high:
+            entry_plan = (
+                f"📉 PULLBACK PLAN\n"
+                f"Current: ${price:.2f} "
+                f"(too high to buy)\n"
+                f"Wait for drop to: "
+                f"${zone_low:.2f}-${zone_high:.2f}\n"
+                f"Needs to fall: {pct_to_zone:.1f}%\n\n"
+                f"WHEN price hits ${zone_high:.2f}:\n"
+                f"→ BUY\n"
+                f"→ Stop: ${stop_from_zone:.2f}\n"
+                f"→ Target: ${target_from_zone:.2f}\n"
+                f"→ Hold 1-3 weeks\n"
+            )
+        else:
+            entry_plan = (
+                f"✅ IN BUY ZONE NOW\n"
+                f"Price ${price:.2f} is in range\n"
+                f"Buy zone: "
+                f"${zone_low:.2f}-${zone_high:.2f}\n"
+                f"Stop: ${stop_from_zone:.2f}\n"
+                f"Target: ${target_from_zone:.2f}\n"
+                f"Hold 1-3 weeks\n"
+            )
+
+        msg += (
+            f"\n━━━━━━━━━━━━━━━━━━━━\n"
+            f"{entry_plan}"
+        )
+
         return msg
 
     except Exception as e:
